@@ -196,4 +196,139 @@ io.on('connection', (socket: Socket) => {
   });
 
   // 2. Real-time Player Movement / State Update
-  socket.on('player_update', (data:
+  socket.on('player_update', (data: Partial<PlayerState> & { action?: string }) => {
+    if (!joinedRoom || !rooms[joinedRoom]) return;
+    const room = rooms[joinedRoom];
+    const player = room.players.get(assignedPlayerId);
+
+    if (player) {
+      if (data.x !== undefined) player.x = data.x;
+      if (data.y !== undefined) player.y = data.y;
+      if (data.z !== undefined) player.z = data.z;
+      if (data.rotation !== undefined) player.rotation = data.rotation;
+      if (data.speed !== undefined) player.speed = data.speed;
+      if (data.health !== undefined) player.health = data.health;
+      if (data.score !== undefined) player.score = data.score;
+      if (data.wantedLevel !== undefined) player.wantedLevel = data.wantedLevel;
+      if (data.vehicle !== undefined) player.vehicle = data.vehicle;
+      player.lastSeen = Date.now();
+
+      socket.to(joinedRoom).emit('player_moved', {
+        id: assignedPlayerId,
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        rotation: player.rotation,
+        speed: player.speed,
+        health: player.health,
+        score: player.score,
+        wantedLevel: player.wantedLevel,
+        vehicle: player.vehicle,
+        action: data.action,
+        timestamp: player.lastSeen,
+      });
+    }
+  });
+
+  // 3. Minecraft Real-time Block Placement
+  socket.on('mc_block_place', (data: { x: number; y: number; z: number; type: string }) => {
+    if (joinedRoom !== 'minecraft') return;
+    const rx = Math.round(data.x);
+    const ry = Math.round(data.y);
+    const rz = Math.round(data.z);
+    const key = `${rx},${ry},${rz}`;
+    minecraftWorldBlocks.set(key, data.type);
+
+    socket.to('minecraft').emit('mc_block_placed', {
+      x: rx,
+      y: ry,
+      z: rz,
+      type: data.type,
+      playerId: assignedPlayerId,
+    });
+  });
+
+  // 4. Minecraft Real-time Block Destruction / Mining
+  socket.on('mc_block_break', (data: { x: number; y: number; z: number }) => {
+    if (joinedRoom !== 'minecraft') return;
+    const rx = Math.round(data.x);
+    const ry = Math.round(data.y);
+    const rz = Math.round(data.z);
+    const key = `${rx},${ry},${rz}`;
+    minecraftWorldBlocks.set(key, 'air');
+
+    socket.to('minecraft').emit('mc_block_broken', {
+      x: rx,
+      y: ry,
+      z: rz,
+      playerId: assignedPlayerId,
+    });
+  });
+
+  // 5. Minecraft Real-time Player Punch / Arm Swing
+  socket.on('mc_player_punch', () => {
+    if (joinedRoom !== 'minecraft') return;
+    socket.to('minecraft').emit('mc_player_punched', {
+      id: assignedPlayerId,
+    });
+  });
+
+  // 6. Chat Messages
+  socket.on('chat_message', (data: { text: string; name?: string; color?: string }) => {
+    if (!joinedRoom || !rooms[joinedRoom]) return;
+    const player = rooms[joinedRoom].players.get(assignedPlayerId);
+    const message = {
+      id: assignedPlayerId,
+      name: player?.name || data.name || 'Oyuncu',
+      color: player?.color || data.color || '#ec4899',
+      text: String(data.text || '').slice(0, 150),
+      timestamp: Date.now(),
+    };
+    io.to(joinedRoom).emit('chat_message', message);
+  });
+
+  // 7. In-Game Actions
+  socket.on('game_action', (data: { actionType: string; payload: unknown }) => {
+    if (!joinedRoom || !rooms[joinedRoom]) return;
+    socket.to(joinedRoom).emit('game_action', {
+      id: assignedPlayerId,
+      actionType: data.actionType,
+      payload: data.payload,
+      timestamp: Date.now(),
+    });
+  });
+
+  // 8. Ping / Pong Latency Check
+  socket.on('ping_check', (clientTimestamp: number, callback: (ack: { clientTimestamp: number; serverTimestamp: number }) => void) => {
+    if (typeof callback === 'function') {
+      callback({
+        clientTimestamp,
+        serverTimestamp: Date.now(),
+      });
+    }
+  });
+
+  // 9. Disconnect
+  socket.on('disconnect', () => {
+    if (joinedRoom && rooms[joinedRoom] && assignedPlayerId) {
+      rooms[joinedRoom].players.delete(assignedPlayerId);
+      socket.to(joinedRoom).emit('player_left', { id: assignedPlayerId });
+      io.emit('room_stats', getRoomStats());
+    }
+  });
+});
+
+// ==========================================
+// 🔌 LEGACY WEBSOCKET HANDLER (PATH /ws)
+// ==========================================
+wss.on('connection', (ws: WebSocket) => {
+  let playerId = '';
+  let currentRoom = '';
+
+  ws.on('message', (messageRaw: string) => {
+    try {
+      const data = JSON.parse(messageRaw.toString());
+
+      if (data.type === 'join') {
+        currentRoom = data.room || 'vice_city';
+        playerId
