@@ -7,6 +7,10 @@ interface UseMultiplayerOptions {
   playerName: string;
   playerColor: string;
   vehicle: string;
+  onBlockPlaced?: (data: { x: number; y: number; z: number; type: string; playerId: string }) => void;
+  onBlockBroken?: (data: { x: number; y: number; z: number; playerId: string }) => void;
+  onWorldSync?: (data: { blocks: Array<{ x: number; y: number; z: number; type: string }> }) => void;
+  onPlayerPunched?: (data: { id: string }) => void;
 }
 
 export interface RoomStats {
@@ -21,6 +25,10 @@ export function useMultiplayer({
   playerName,
   playerColor,
   vehicle,
+  onBlockPlaced,
+  onBlockBroken,
+  onWorldSync,
+  onPlayerPunched,
 }: UseMultiplayerOptions) {
   const [connected, setConnected] = useState<boolean>(false);
   const [ping, setPing] = useState<number>(14);
@@ -39,10 +47,27 @@ export function useMultiplayer({
 
   const socketRef = useRef<Socket | null>(null);
 
-  // Ambient bots simulation to ensure lively world even when testing alone
+  const onBlockPlacedRef = useRef(onBlockPlaced);
+  const onBlockBrokenRef = useRef(onBlockBroken);
+  const onWorldSyncRef = useRef(onWorldSync);
+  const onPlayerPunchedRef = useRef(onPlayerPunched);
+
+  useEffect(() => {
+    onBlockPlacedRef.current = onBlockPlaced;
+    onBlockBrokenRef.current = onBlockBroken;
+    onWorldSyncRef.current = onWorldSync;
+    onPlayerPunchedRef.current = onPlayerPunched;
+  }, [onBlockPlaced, onBlockBroken, onWorldSync, onPlayerPunched]);
+
+  // Ambient bots simulation to ensure lively world only for single-player arcade demos
   const botsRef = useRef<RemotePlayer[]>([]);
 
   useEffect(() => {
+    if (room === 'minecraft') {
+      botsRef.current = [];
+      return;
+    }
+
     const botColors = ['#f43f5e', '#06b6d4', '#eab308', '#a855f7'];
     const botNames = ['Tommy_V', 'Lance_Vance', 'Ken_Rosenberg', 'Sonny_F'];
     const botVehicles = ['cheetah', 'infernus', 'banshee', 'cruiser'];
@@ -102,7 +127,7 @@ export function useMultiplayer({
     socket.on('init', (data: { players: RemotePlayer[]; id: string }) => {
       setPlayers(() => {
         const map = new Map<string, RemotePlayer>();
-        // Add ambient bots
+        // Add ambient bots only if any
         botsRef.current.forEach((bot) => map.set(bot.id, bot));
         // Add real connected players from server
         (data.players || []).forEach((p: RemotePlayer) => {
@@ -138,6 +163,7 @@ export function useMultiplayer({
             if (data.health !== undefined) existing.health = data.health;
             if (data.score !== undefined) existing.score = data.score;
             if (data.wantedLevel !== undefined) existing.wantedLevel = data.wantedLevel;
+            if (data.vehicle !== undefined) existing.vehicle = data.vehicle;
             existing.lastSeen = Date.now();
           } else {
             // New player not in map yet
@@ -145,7 +171,7 @@ export function useMultiplayer({
               id: data.id,
               name: data.name || 'Oyuncu',
               color: data.color || '#ec4899',
-              vehicle: data.vehicle || 'cheetah',
+              vehicle: data.vehicle || 'none',
               x: data.x || 0,
               y: data.y || 0,
               z: data.z || 0,
@@ -168,6 +194,23 @@ export function useMultiplayer({
         next.delete(data.id);
         return next;
       });
+    });
+
+    // Minecraft specific socket events
+    socket.on('mc_block_placed', (data: { x: number; y: number; z: number; type: string; playerId: string }) => {
+      onBlockPlacedRef.current?.(data);
+    });
+
+    socket.on('mc_block_broken', (data: { x: number; y: number; z: number; playerId: string }) => {
+      onBlockBrokenRef.current?.(data);
+    });
+
+    socket.on('mc_world_sync', (data: { blocks: Array<{ x: number; y: number; z: number; type: string }> }) => {
+      onWorldSyncRef.current?.(data);
+    });
+
+    socket.on('mc_player_punched', (data: { id: string }) => {
+      onPlayerPunchedRef.current?.(data);
     });
 
     socket.on('chat_message', (msg: ChatMessage) => {
@@ -271,6 +314,27 @@ export function useMultiplayer({
     []
   );
 
+  // Minecraft: Send block placed by local player
+  const sendBlockPlace = useCallback((x: number, y: number, z: number, type: string) => {
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('mc_block_place', { x, y, z, type });
+    }
+  }, []);
+
+  // Minecraft: Send block broken by local player
+  const sendBlockBreak = useCallback((x: number, y: number, z: number) => {
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('mc_block_break', { x, y, z });
+    }
+  }, []);
+
+  // Minecraft: Send player arm punch
+  const sendPlayerPunch = useCallback(() => {
+    if (socketRef.current && socketRef.current.connected) {
+      socketRef.current.emit('mc_player_punch');
+    }
+  }, []);
+
   return {
     connected,
     ping,
@@ -282,5 +346,8 @@ export function useMultiplayer({
     sendUpdate,
     sendChat,
     sendAction,
+    sendBlockPlace,
+    sendBlockBreak,
+    sendPlayerPunch,
   };
 }

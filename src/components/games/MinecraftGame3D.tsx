@@ -16,6 +16,8 @@ import {
   Sun,
   Moon,
   Flame,
+  Maximize,
+  Minimize,
 } from 'lucide-react';
 
 interface MinecraftGameProps {
@@ -61,7 +63,7 @@ const BLOCK_DEFS: Record<BlockType, BlockDef> = {
   beef: { id: 'beef', name: 'Çiğ Sığır Eti', color: '#f43f5e', scoreVal: 20 },
 };
 
-const INITIAL_HOTBAR: BlockType[] = ['grass', 'stone', 'dirt', 'wood', 'birch', 'leaves', 'diamond', 'tnt'];
+const INITIAL_HOTBAR: (BlockType | null)[] = [null, null, null, null, null, null, null, null];
 
 const MinecraftHeart: React.FC<{ fill: 'full' | 'half' | 'empty' }> = ({ fill }) => {
   const fillColor = fill === 'empty' ? '#1e293b' : '#E11D48';
@@ -484,15 +486,15 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
   // Game state
   const [gameStarted, setGameStarted] = useState<boolean>(false);
-  const [hotbarSlots, setHotbarSlots] = useState<BlockType[]>(INITIAL_HOTBAR);
-  const hotbarSlotsRef = useRef<BlockType[]>(INITIAL_HOTBAR);
+  const [hotbarSlots, setHotbarSlots] = useState<(BlockType | null)[]>(INITIAL_HOTBAR);
+  const hotbarSlotsRef = useRef<(BlockType | null)[]>(INITIAL_HOTBAR);
 
   useEffect(() => {
     hotbarSlotsRef.current = hotbarSlots;
   }, [hotbarSlots]);
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [playerName, setPlayerName] = useState<string>('Steve_Builder');
-  const [selectedBlock, setSelectedBlock] = useState<BlockType>('grass');
+  const [selectedBlock, setSelectedBlock] = useState<BlockType | null>(null);
   
   // Survival States: Health (Hearts) & Hunger (Shanks)
   const [health, setHealth] = useState<number>(20); // Max 20 (10 hearts)
@@ -501,7 +503,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   
   // Real-time synchronous inventory to prevent race conditions or negative counts
   const inventoryRef = useRef<Record<BlockType, number>>({
-    grass: 10, stone: 10, dirt: 15, wood: 10, birch: 10, leaves: 5, diamond: 0, glass: 0, brick: 0, tnt: 0, beef: 0
+    grass: 0, stone: 0, dirt: 0, wood: 0, birch: 0, leaves: 0, diamond: 0, glass: 0, brick: 0, tnt: 0, beef: 0
   });
   const [inventory, setInventory] = useState<Record<BlockType, number>>(inventoryRef.current);
   const [draggedItem, setDraggedItem] = useState<BlockType | null>(null);
@@ -533,18 +535,41 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     }
   }, [showCrafting]);
 
-  // Synchronous Inventory Action Handlers to prevent negative/race-condition counts
+  // Synchronous Inventory Action Handlers
   const addToInventory = useCallback((type: BlockType) => {
     const current = inventoryRef.current[type] || 0;
     inventoryRef.current[type] = current + 1;
     setInventory({ ...inventoryRef.current });
+
+    // Auto-populate into the first empty hotbar slot if not present
+    setHotbarSlots((prev) => {
+      if (prev.includes(type)) return prev;
+      const emptyIdx = prev.findIndex((slot) => slot === null);
+      if (emptyIdx !== -1) {
+        const updated = [...prev];
+        updated[emptyIdx] = type;
+        return updated;
+      }
+      return prev;
+    });
+
+    // Auto-select as hand-held block if nothing is currently selected
+    setSelectedBlock((prev) => (prev === null ? type : prev));
   }, []);
 
-  const removeFromInventory = useCallback((type: BlockType): boolean => {
+  const removeFromInventory = useCallback((type: BlockType | null): boolean => {
+    if (!type) return false;
     const current = inventoryRef.current[type] || 0;
     if (current > 0) {
-      inventoryRef.current[type] = current - 1;
+      const newCount = current - 1;
+      inventoryRef.current[type] = newCount;
       setInventory({ ...inventoryRef.current });
+
+      if (newCount === 0) {
+        // Clear from hotbar if count drops to 0
+        setHotbarSlots((prev) => prev.map((slot) => (slot === type ? null : slot)));
+        setSelectedBlock((prev) => (prev === type ? null : prev));
+      }
       return true;
     }
     inventoryRef.current[type] = 0;
@@ -596,16 +621,80 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return () => clearInterval(interval);
   }, [gameStarted, isPaused]);
 
-  // Modals
-  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false); // Changed from true to false, as we'll use StartScreen
+  // Modals & Multiplayer UI states
+  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const [isInviteOpen, setIsInviteOpen] = useState<boolean>(false);
+  const [isMultiplayerMode, setIsMultiplayerMode] = useState<boolean>(true);
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
+  const [chatInputText, setChatInputText] = useState<string>('');
+  const [showPlayerList, setShowPlayerList] = useState<boolean>(false);
+  const isChatOpenRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    isChatOpenRef.current = isChatOpen;
+  }, [isChatOpen]);
+
+  // Stable references for block operations
+  const addBlockRef = useRef<(x: number, y: number, z: number, type: BlockType) => void>(() => {});
+  const removeBlockRef = useRef<(x: number, y: number, z: number) => void>(() => {});
+
+  // Remote Steves 3D tracking
+  interface RemoteSteveInstance {
+    group: THREE.Group;
+    armR: THREE.Mesh;
+    armL: THREE.Mesh;
+    legL: THREE.Mesh;
+    legR: THREE.Mesh;
+    labelSprite: THREE.Sprite;
+    chatSprite: THREE.Sprite | null;
+    heldItemMesh: THREE.Mesh | null;
+    currentHeldType: string | null;
+    punchTime: number;
+    chatExpiry: number;
+  }
+  const remoteStevesRef = useRef<Map<string, RemoteSteveInstance>>(new Map());
 
   // Multiplayer Hook
-  const { connected, playerId, players, sendUpdate, sendChat, chatMessages } = useMultiplayer({
+  const {
+    connected,
+    ping,
+    playerId,
+    players,
+    sendUpdate,
+    sendChat,
+    sendBlockPlace,
+    sendBlockBreak,
+    sendPlayerPunch,
+    chatMessages,
+  } = useMultiplayer({
     room: 'minecraft',
     playerName,
-    playerColor: '#10b981',
-    vehicle: selectedBlock,
+    playerColor: playerColor || '#10b981',
+    vehicle: selectedBlock || 'none',
+    onBlockPlaced: (data) => {
+      if (data.playerId === playerId) return;
+      addBlockRef.current(data.x, data.y, data.z, data.type as BlockType);
+      sound.playTone(450, 'triangle', 0.05, 0.15);
+    },
+    onBlockBroken: (data) => {
+      if (data.playerId === playerId) return;
+      removeBlockRef.current(data.x, data.y, data.z);
+      sound.playTone(320, 'sine', 0.05, 0.15);
+    },
+    onWorldSync: (data) => {
+      if (!data?.blocks) return;
+      data.blocks.forEach((b) => {
+        if (b.type === 'air') {
+          removeBlockRef.current(b.x, b.y, b.z);
+        } else {
+          addBlockRef.current(b.x, b.y, b.z, b.type as BlockType);
+        }
+      });
+    },
+    onPlayerPunched: (data) => {
+      const inst = remoteStevesRef.current.get(data.id);
+      if (inst) inst.punchTime = performance.now();
+    },
   });
 
   // Three.js instances
@@ -663,6 +752,60 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
   }, []);
+
+  // Fullscreen and Full-Viewport Mode State & Handlers
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      const isCurrentlyFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement
+      );
+
+      if (!isCurrentlyFs) {
+        if (wrapperRef.current?.requestFullscreen) {
+          await wrapperRef.current.requestFullscreen();
+        } else if ((wrapperRef.current as any)?.webkitRequestFullscreen) {
+          await (wrapperRef.current as any).webkitRequestFullscreen();
+        }
+        setIsFullscreen(true);
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any)?.webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        }
+        setIsFullscreen(false);
+      }
+    } catch {
+      // In case browser or iframe security sandbox blocks native requestFullscreen, toggle CSS full viewport mode
+      setIsFullscreen((prev) => !prev);
+    }
+    setTimeout(handleResize, 60);
+    setTimeout(handleResize, 200);
+  }, [handleResize]);
+
+  // Sync with browser native fullscreenchange events
+  useEffect(() => {
+    const handleFsChange = () => {
+      const isFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement
+      );
+      setIsFullscreen(isFs);
+      setTimeout(handleResize, 60);
+      setTimeout(handleResize, 250);
+    };
+
+    document.addEventListener('fullscreenchange', handleFsChange);
+    document.addEventListener('webkitfullscreenchange', handleFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange);
+      document.removeEventListener('webkitfullscreenchange', handleFsChange);
+    };
+  }, [handleResize]);
 
   // Player physics
   const playerPosRef = useRef({
@@ -734,7 +877,131 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return mat;
   }, []);
 
-  // Steve 3D Model Builder (for 3rd person and remote players)
+  // 3D Canvas Nameplate Sprite
+  const createNameplateSprite = useCallback((name: string, color = '#22c55e') => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+      ctx.beginPath();
+      ctx.roundRect(8, 8, 240, 48, 8);
+      ctx.fill();
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      ctx.font = 'bold 22px monospace';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(name.slice(0, 16), 128, 32);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(2.2, 0.55, 1);
+    sprite.position.y = 3.3; // Above Steve's head
+    return sprite;
+  }, []);
+
+  // 3D Speech Bubble Sprite
+  const createChatBubbleSprite = useCallback((text: string) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.roundRect(10, 10, 492, 108, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`💬 ${text.slice(0, 24)}`, 256, 64);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(3.2, 0.8, 1);
+    sprite.position.y = 4.3; // Above nameplate
+    return sprite;
+  }, []);
+
+  // Remote Steve 3D Model Builder (for other online players)
+  const createRemoteSteveMesh = useCallback((name: string, colorHex = '#0ea5e9'): RemoteSteveInstance => {
+    const steve = new THREE.Group();
+
+    // Head
+    const headMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), headMat);
+    head.position.y = 2.4;
+    steve.add(head);
+
+    // Hair
+    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.25, 0.85), new THREE.MeshStandardMaterial({ color: '#451a03' }));
+    hair.position.set(0, 2.72, 0);
+    steve.add(hair);
+
+    // Torso with player's color
+    const torsoMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.7 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.5), torsoMat);
+    torso.position.y = 1.4;
+    steve.add(torso);
+
+    // Left Arm
+    const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
+    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.2, 0.35), armMat);
+    armL.position.set(-0.65, 1.4, 0);
+    steve.add(armL);
+
+    // Right Arm (pivot at shoulder)
+    const armRGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+    armRGeo.translate(0, -0.4, 0);
+    const armR = new THREE.Mesh(armRGeo, armMat);
+    armR.position.set(0.65, 1.8, 0);
+    steve.add(armR);
+
+    // Legs
+    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), pantsMat);
+    legL.position.set(-0.25, 0.5, 0);
+    steve.add(legL);
+
+    const legR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), pantsMat);
+    legR.position.set(0.25, 0.5, 0);
+    steve.add(legR);
+
+    // Nameplate
+    const labelSprite = createNameplateSprite(name, colorHex);
+    steve.add(labelSprite);
+
+    return {
+      group: steve,
+      armR,
+      armL,
+      legL,
+      legR,
+      labelSprite,
+      chatSprite: null,
+      heldItemMesh: null,
+      currentHeldType: null,
+      punchTime: 0,
+      chatExpiry: 0,
+    };
+  }, [createNameplateSprite]);
+
+  // Steve 3D Model Builder (for 3rd person local player)
   const createSteveMesh = (colorHex = '#0ea5e9') => {
     const steve = new THREE.Group();
 
@@ -814,6 +1081,12 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return record.type;
   }, []);
 
+  // Keep stable refs updated
+  useEffect(() => {
+    addBlockRef.current = addBlock;
+    removeBlockRef.current = removeBlock;
+  }, [addBlock, removeBlock]);
+
   // TNT explosion
   const explodeTnt = useCallback((cx: number, cy: number, cz: number) => {
     sound.playExplosion();
@@ -826,11 +1099,31 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         for (let z = cz - radius; z <= cz + radius; z++) {
           if (Math.hypot(x - cx, y - cy, z - cz) <= radius) {
             removeBlock(x, y, z);
+            sendBlockBreak(x, y, z);
           }
         }
       }
     }
-  }, [removeBlock]);
+  }, [removeBlock, sendBlockBreak]);
+
+  // Display floating speech bubble above remote player when chat message is received
+  useEffect(() => {
+    if (chatMessages.length === 0) return;
+    const latest = chatMessages[chatMessages.length - 1];
+    if (!latest || latest.id === playerId) return;
+
+    const inst = remoteStevesRef.current.get(latest.id);
+    if (inst) {
+      if (inst.chatSprite) {
+        inst.group.remove(inst.chatSprite);
+        inst.chatSprite.material.dispose();
+      }
+      const bubble = createChatBubbleSprite(latest.text);
+      inst.group.add(bubble);
+      inst.chatSprite = bubble;
+      inst.chatExpiry = performance.now() + 5000;
+    }
+  }, [chatMessages, playerId, createChatBubbleSprite]);
 
   // Cow 3D Mesh Generator
   const createCowMesh = useCallback(() => {
@@ -905,11 +1198,17 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     mobsRef.current = [];
 
     for (let i = 0; i < count; i++) {
-      const rx = Math.floor(Math.random() * 32) - 16;
-      const rz = Math.floor(Math.random() * 32) - 16;
+      const rx = Math.floor(Math.random() * 28) - 14;
+      const rz = Math.floor(Math.random() * 28) - 14;
       
-      const hill = Math.floor(Math.sin(rx * 0.28) * Math.cos(rz * 0.28) * 2.5 + 2);
-      const ry = Math.max(0, hill) + 1.0;
+      let ry = 8;
+      for (let y = 20; y >= -10; y--) {
+        const key = `${rx},${y},${rz}`;
+        if (worldBlocksRef.current.has(key)) {
+          ry = y + 1.0;
+          break;
+        }
+      }
 
       const cowData = createCowMesh();
       cowData.group.position.set(rx, ry, rz);
@@ -924,8 +1223,8 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         x: rx,
         y: ry,
         z: rz,
-        targetX: rx + (Math.random() * 12 - 6),
-        targetZ: rz + (Math.random() * 12 - 6),
+        targetX: rx + (Math.random() * 10 - 5),
+        targetZ: rz + (Math.random() * 10 - 5),
         idleTimer: Math.random() * 6 + 2,
         health: 4,
         legFL: cowData.legFL,
@@ -937,30 +1236,41 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     }
   }, [createCowMesh]);
 
-  // Terrain Generator
+  // Terrain Generator with Deep Underground Layers
   const generateWorld = useCallback((worldSize: number) => {
+    const minY = -6; // Deep bottom bedrock floor layer
+
     for (let x = -worldSize; x <= worldSize; x++) {
       for (let z = -worldSize; z <= worldSize; z++) {
-        // Height formula: wavy rolling hills
-        const hill = Math.floor(Math.sin(x * 0.28) * Math.cos(z * 0.28) * 2.5 + 2);
-        const surfaceY = Math.max(0, hill);
+        // Height formula: wavy rolling hills on surface
+        const hill = Math.floor(Math.sin(x * 0.28) * Math.cos(z * 0.28) * 2.2 + 4);
+        const surfaceY = Math.max(2, hill);
 
-        // Bedrock & Stone layer (Kırıktaş)
-        for (let y = 0; y < surfaceY - 2; y++) {
-          const isDiamond = Math.random() < 0.035 && y <= 1;
+        // 1. Bottom Bedrock Floor Layer (y = minY)
+        addBlock(x, minY, z, 'stone');
+
+        // 2. Deep Stone & Diamond Veins Layer (y from minY + 1 to 0)
+        for (let y = minY + 1; y <= 0; y++) {
+          const isDiamond = Math.random() < 0.055; // 5.5% diamond rate deep underground
           addBlock(x, y, z, isDiamond ? 'diamond' : 'stone');
         }
 
-        // Dirt layers immediately under the grass (Toprak)
-        for (let y = Math.max(0, surfaceY - 2); y < surfaceY; y++) {
+        // 3. Upper Stone Layer (y from 1 to surfaceY - 3)
+        for (let y = 1; y < surfaceY - 2; y++) {
+          const isDiamond = Math.random() < 0.018 && y <= 2;
+          addBlock(x, y, z, isDiamond ? 'diamond' : 'stone');
+        }
+
+        // 4. Subsurface Dirt Layers (y from surfaceY - 2 to surfaceY - 1)
+        for (let y = Math.max(1, surfaceY - 2); y < surfaceY; y++) {
           addBlock(x, y, z, 'dirt');
         }
 
-        // Top Grass Block (Çimenli Toprak)
+        // 5. Surface Grass Block (y = surfaceY)
         addBlock(x, surfaceY, z, 'grass');
 
-        // Spawn occasional Trees (Oak Wood or Birch Wood)
-        if (Math.random() < 0.035 && Math.abs(x) > 2 && Math.abs(z) > 2) {
+        // 6. Spawn occasional Trees on surface
+        if (Math.random() < 0.032 && Math.abs(x) > 2 && Math.abs(z) > 2) {
           const trunkBase = surfaceY + 1;
           const isBirch = Math.random() < 0.45;
           const woodType = isBirch ? 'birch' : 'wood';
@@ -1047,8 +1357,22 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   // Trigger world generation when game starts
   useEffect(() => {
     if (gameStarted) {
-      generateWorld(24); // Increased size from 14 to 24
+      generateWorld(18); // Deep layered world
       spawnCows(8); // Spawn 8 cute cow mobs!
+
+      // Position Steve right on top of the surface grass at (0, 0)
+      let spawnY = 8;
+      for (let y = 20; y >= -10; y--) {
+        if (worldBlocksRef.current.has(`0,${y},0`)) {
+          spawnY = y + 1.5;
+          break;
+        }
+      }
+      playerPosRef.current.x = 0;
+      playerPosRef.current.y = spawnY;
+      playerPosRef.current.z = 0;
+      playerPosRef.current.vy = 0;
+
       handleResize(); // Ensure renderer is resized when it becomes visible
     }
   }, [gameStarted, generateWorld, spawnCows, handleResize]);
@@ -1068,7 +1392,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       firstPersonHeldRef.current = null;
     }
 
-    if (camera && cameraView === 'first' && gameStarted) {
+    if (camera && cameraView === 'first' && gameStarted && selectedBlock) {
       const geo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
       const mat = getBlockMaterial(selectedBlock);
       const mesh = new THREE.Mesh(geo, mat);
@@ -1090,17 +1414,22 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     }
 
     if (rightArmRef.current && gameStarted) {
-      const geo = new THREE.BoxGeometry(0.24, 0.24, 0.24);
-      const mat = getBlockMaterial(selectedBlock);
-      const mesh = new THREE.Mesh(geo, mat);
-      
-      // Position at the very end of right hand
-      mesh.position.set(0, -0.65, -0.15);
-      rightArmRef.current.add(mesh);
-      thirdPersonHeldRef.current = mesh;
+      if (selectedBlock) {
+        const geo = new THREE.BoxGeometry(0.24, 0.24, 0.24);
+        const mat = getBlockMaterial(selectedBlock);
+        const mesh = new THREE.Mesh(geo, mat);
+        
+        // Position at the very end of right hand
+        mesh.position.set(0, -0.65, -0.15);
+        rightArmRef.current.add(mesh);
+        thirdPersonHeldRef.current = mesh;
 
-      // Raise right arm forward to point / hold the block
-      rightArmRef.current.rotation.x = -Math.PI / 3.5;
+        // Raise right arm forward to point / hold the block
+        rightArmRef.current.rotation.x = -Math.PI / 3.5;
+      } else {
+        // Arm rests down naturally if holding nothing
+        rightArmRef.current.rotation.x = 0;
+      }
     }
   }, [selectedBlock, cameraView, gameStarted, getBlockMaterial]);
 
@@ -1260,8 +1589,10 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
       if (e.button === 0) {
         // LEFT CLICK: MINE / BREAK BLOCK
+        sendPlayerPunch();
         const minedType = removeBlock(bx, by, bz);
         if (minedType) {
+          sendBlockBreak(bx, by, bz);
           addToInventory(minedType); // Add to inventory
           if (minedType === 'tnt') {
             explodeTnt(bx, by, bz);
@@ -1292,7 +1623,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
           // Don't place inside player
           const player = playerPosRef.current;
           if (Math.hypot(px - player.x, pz - player.z) > 0.6 || Math.abs(py - player.y) > 1.8) {
-            addBlock(px, py, pz, selectedBlock);
+            addBlock(px, py, pz, selectedBlock!);
+            sendBlockPlace(px, py, pz, selectedBlock!);
+            sendPlayerPunch();
             sound.playTone(450, 'triangle', 0.07, 0.2);
             setBlocksPlaced((p) => p + 1);
             setScore((s) => {
@@ -1300,7 +1633,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
               onUpdateHighScore(newScore);
               return newScore;
             });
-          } else {
+          } else if (selectedBlock) {
             addToInventory(selectedBlock); // Refund if unable to place
           }
         } else {
@@ -1328,11 +1661,20 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       container.removeEventListener('contextmenu', handleContextMenu);
       container.removeEventListener('click', handleClick);
     };
-  }, [gameStarted, addBlock, removeBlock, explodeTnt, selectedBlock, onUpdateHighScore]);
+  }, [gameStarted, addBlock, removeBlock, explodeTnt, selectedBlock, onUpdateHighScore, sendBlockBreak, sendBlockPlace, sendPlayerPunch]);
 
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // If chat is open, allow typing and only handle Escape
+      if (isChatOpenRef.current) {
+        if (e.key === 'Escape') {
+          setIsChatOpen(false);
+          containerRef.current?.requestPointerLock?.();
+        }
+        return;
+      }
+
       const k = e.key.toLowerCase();
       if (k === 'w' || e.key === 'ArrowUp') keysRef.current.w = true;
       if (k === 's' || e.key === 'ArrowDown') keysRef.current.s = true;
@@ -1360,6 +1702,24 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         e.preventDefault();
         setShowCrafting((prev) => !prev);
       }
+      // Fullscreen mode toggle
+      if (k === 'f' || e.key === 'F11') {
+        e.preventDefault();
+        toggleFullscreen();
+      }
+      // Chat toggle [T] or [Enter]
+      if ((k === 't' || e.key === 'Enter') && !showCrafting && !isPaused) {
+        e.preventDefault();
+        setIsChatOpen(true);
+        if (document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+      }
+      // Player list toggle [TAB]
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        setShowPlayerList((prev) => !prev);
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -1377,7 +1737,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
+  }, [toggleFullscreen]);
 
   // Main Minecraft Game Loop & Voxel Physics
   useEffect(() => {
@@ -1471,8 +1831,8 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         // Snap cow perfectly on top of physical terrain
         const cx = Math.round(mob.x);
         const cz = Math.round(mob.z);
-        let groundHeight = 0;
-        for (let y = 15; y >= 0; y--) {
+        let groundHeight = -10;
+        for (let y = 20; y >= -10; y--) {
           const key = `${cx},${y},${cz}`;
           if (worldBlocksRef.current.has(key)) {
             groundHeight = y + 1.0;
@@ -1520,6 +1880,97 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
           }
           drops.splice(i, 1);
         }
+      }
+
+      // 3. Update Remote Online Players in 3D Scene
+      if (sceneInstance) {
+        const activeRemoteIds = new Set<string>();
+
+        players.forEach((rp, id) => {
+          if (id === playerId) return;
+          activeRemoteIds.add(id);
+
+          let inst = remoteStevesRef.current.get(id);
+          if (!inst) {
+            inst = createRemoteSteveMesh(rp.name, rp.color || '#0ea5e9');
+            sceneInstance.add(inst.group);
+            remoteStevesRef.current.set(id, inst);
+          }
+
+          // Smooth interpolation towards network position
+          inst.group.position.x += (rp.x - inst.group.position.x) * 0.3;
+          inst.group.position.y += (rp.y - inst.group.position.y) * 0.3;
+          inst.group.position.z += (rp.z - inst.group.position.z) * 0.3;
+          inst.group.rotation.y = rp.rotation;
+
+          // Leg & arm walking swing
+          const spd = rp.speed || 0;
+          if (spd > 0.1) {
+            const walk = Math.sin(now * 0.012) * 0.6;
+            inst.legL.rotation.x = walk;
+            inst.legR.rotation.x = -walk;
+            inst.armL.rotation.x = -walk;
+            if (now - inst.punchTime > 400) {
+              inst.armR.rotation.x = walk;
+            }
+          } else {
+            inst.legL.rotation.x = 0;
+            inst.legR.rotation.x = 0;
+            inst.armL.rotation.x = 0;
+            if (now - inst.punchTime > 400) {
+              inst.armR.rotation.x = 0;
+            }
+          }
+
+          // Punch animation
+          if (now - inst.punchTime <= 400) {
+            const punchP = (now - inst.punchTime) / 400;
+            inst.armR.rotation.x = -Math.PI / 2.5 - Math.sin(punchP * Math.PI) * 0.8;
+          }
+
+          // Held Item Synchronization (vehicle field holds the block type)
+          const heldType = rp.vehicle;
+          if (heldType && heldType !== 'none' && heldType !== inst.currentHeldType) {
+            if (inst.heldItemMesh) {
+              inst.armR.remove(inst.heldItemMesh);
+              inst.heldItemMesh.geometry.dispose();
+            }
+            try {
+              const itemGeo = new THREE.BoxGeometry(0.35, 0.35, 0.35);
+              const itemMat = getBlockMaterial(heldType as BlockType);
+              const itemMesh = new THREE.Mesh(itemGeo, itemMat);
+              itemMesh.position.set(0, -0.7, 0.3);
+              inst.armR.add(itemMesh);
+              inst.heldItemMesh = itemMesh;
+              inst.currentHeldType = heldType;
+            } catch {
+              // ignore
+            }
+          } else if ((!heldType || heldType === 'none') && inst.heldItemMesh) {
+            inst.armR.remove(inst.heldItemMesh);
+            inst.heldItemMesh.geometry.dispose();
+            inst.heldItemMesh = null;
+            inst.currentHeldType = null;
+          }
+
+          // Speech bubble expiry
+          if (inst.chatSprite && now > inst.chatExpiry) {
+            inst.group.remove(inst.chatSprite);
+            inst.chatSprite.material.dispose();
+            inst.chatSprite = null;
+          }
+        });
+
+        // Cleanup disconnected players
+        remoteStevesRef.current.forEach((inst, id) => {
+          if (!activeRemoteIds.has(id)) {
+            sceneInstance.remove(inst.group);
+            if (inst.heldItemMesh) inst.heldItemMesh.geometry.dispose();
+            if (inst.chatSprite) inst.chatSprite.material.dispose();
+            inst.labelSprite.material.dispose();
+            remoteStevesRef.current.delete(id);
+          }
+        });
       }
 
       const pos = playerPosRef.current;
@@ -1571,10 +2022,10 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       // Voxel Ground Collision & Gravity
       const footBlockX = Math.round(pos.x);
       const footBlockZ = Math.round(pos.z);
-      let groundY = 0;
+      let groundY = -30;
 
-      // Find highest block below player feet (strictly starting from pos.y - 1.0 to prevent climbing walls/trees)
-      for (let y = Math.floor(pos.y - 1.0); y >= 0; y--) {
+      // Find highest block below player feet (supports deep underground layers)
+      for (let y = Math.floor(pos.y - 1.0); y >= -15; y--) {
         const key = `${footBlockX},${y},${footBlockZ}`;
         if (worldBlocksRef.current.has(key)) {
           groundY = y + 1.5; // stand on top of block
@@ -1596,6 +2047,14 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       if (pos.y <= groundY) {
         pos.y = groundY;
         pos.isJumping = false;
+        pos.vy = 0;
+      }
+
+      // Void protection (respawn on surface if fallen into void)
+      if (pos.y < -20) {
+        pos.x = 0;
+        pos.y = 12;
+        pos.z = 0;
         pos.vy = 0;
       }
 
@@ -1698,7 +2157,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         rotation: pos.yaw,
         speed: moveSpeed,
         score,
-        vehicle: selectedBlock,
+        vehicle: selectedBlock || undefined,
       });
 
       // Render
@@ -1716,9 +2175,35 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   }, [gameStarted, cameraView, selectedBlock, score, sendUpdate, isPaused]);
 
   return (
-    <div className="relative w-full aspect-16/10 sm:aspect-16/9 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl select-none">
+    <div
+      ref={wrapperRef}
+      className={`select-none transition-all duration-200 ${
+        isFullscreen
+          ? 'fixed inset-0 z-50 w-screen h-screen bg-slate-950 overflow-hidden rounded-none border-none shadow-none'
+          : 'relative w-full aspect-16/10 sm:aspect-16/9 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl'
+      }`}
+    >
       {/* 3D WebGL Canvas */}
       <div ref={containerRef} className={`w-full h-full cursor-crosshair ${gameStarted ? '' : 'hidden'}`} />
+
+      {/* Floating Tam Ekran / Full Mod Button */}
+      <button
+        onClick={toggleFullscreen}
+        title={isFullscreen ? 'Tam Ekrandan Çık (F / Esc)' : 'Tam Ekran Modu (F / F11)'}
+        className="absolute top-3 right-3 z-40 flex items-center gap-1.5 px-3 py-1.5 bg-slate-900/85 hover:bg-slate-800 text-slate-200 hover:text-white rounded-lg border border-slate-700/80 shadow-lg backdrop-blur-md font-sans text-xs transition-all active:scale-95 cursor-pointer pointer-events-auto"
+      >
+        {isFullscreen ? (
+          <>
+            <Minimize className="w-3.5 h-3.5 text-amber-400" />
+            <span className="font-semibold">Normal Ekran</span>
+          </>
+        ) : (
+          <>
+            <Maximize className="w-3.5 h-3.5 text-amber-400" />
+            <span className="font-semibold">Tam Ekran</span>
+          </>
+        )}
+      </button>
 
       {/* Start Screen */}
       {!gameStarted && (
@@ -1744,24 +2229,41 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
           <div className="flex flex-col gap-2.5 items-center w-full max-w-sm px-4 z-10">
             <button
               onClick={() => {
+                setIsMultiplayerMode(false);
                 setGameStarted(true);
                 sound.playBonus();
               }}
               className="w-full py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] active:border-t-[#2a2a2a] active:border-l-[#2a2a2a] active:border-b-[#8a8a8a] active:border-r-[#8a8a8a] font-arcade text-xs tracking-wide shadow-md transition-all rounded-none cursor-pointer"
             >
-              Singleplayer (Dünya Oluştur)
+              Singleplayer (Tek Oyunculu)
             </button>
 
             <button
-              onClick={() => alert("Çok Oyunculu mod lobi üzerinden canlıdır!")}
-              className="w-full py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-xs tracking-wide shadow-md rounded-none"
+              onClick={() => {
+                setIsMultiplayerMode(true);
+                setGameStarted(true);
+                sound.playBonus();
+              }}
+              className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold border-2 border-t-emerald-400 border-l-emerald-400 border-b-emerald-950 border-r-emerald-950 font-arcade text-xs tracking-wide shadow-lg transition-all rounded-none cursor-pointer flex items-center justify-center gap-2"
             >
-              Multiplayer
+              <Users className="w-4 h-4 text-emerald-300" />
+              <span>Multiplayer (Canlı Çevrimiçi Sunucu)</span>
+              <span className="px-1.5 py-0.5 bg-emerald-950/80 rounded text-[9px] text-emerald-300 font-mono">
+                {players.size + 1} Çevrimiçi
+              </span>
+            </button>
+
+            <button
+              onClick={toggleFullscreen}
+              className="w-full py-2 bg-[#3a3a3a] hover:bg-[#4a4a4a] text-[#ffffa0] border-2 border-t-[#777777] border-l-[#777777] border-b-[#222222] border-r-[#222222] font-arcade text-xs tracking-wide shadow-md rounded-none flex items-center justify-center gap-2 cursor-pointer"
+            >
+              {isFullscreen ? <Minimize className="w-3.5 h-3.5 text-amber-400" /> : <Maximize className="w-3.5 h-3.5 text-amber-400" />}
+              <span>{isFullscreen ? 'Normal Ekran' : 'Tam Ekran Modu'}</span>
             </button>
 
             <button
               disabled
-              className="w-full py-2.5 bg-[#3a3a3a] text-slate-500 border-2 border-t-slate-600 border-l-slate-600 border-b-slate-800 border-r-slate-800 font-arcade text-xs tracking-wide cursor-not-allowed opacity-50 rounded-none"
+              className="w-full py-2 bg-[#3a3a3a] text-slate-500 border-2 border-t-slate-600 border-l-slate-600 border-b-slate-800 border-r-slate-800 font-arcade text-xs tracking-wide cursor-not-allowed opacity-50 rounded-none"
             >
               Minecraft Realms
             </button>
@@ -1791,36 +2293,55 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       {/* Game UI - Only show when game is started */}
       {gameStarted && (
         <>
+          {/* Top-Left Online Multiplayer Status & Quick Controls */}
+          <div className="absolute top-3 left-3 z-30 flex flex-wrap items-center gap-2 pointer-events-auto select-none">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-900/85 backdrop-blur-md rounded-lg border border-slate-700/80 text-xs shadow-lg font-arcade">
+              <span className="flex h-2 w-2 relative">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${connected ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${connected ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+              </span>
+              <span className="text-white font-bold tracking-wider">
+                {connected ? 'ONLINE SUNUCU' : 'BAĞLANIYOR...'}
+              </span>
+              <span className="text-slate-500">|</span>
+              <span className="text-emerald-400 font-bold">{players.size + 1} Oyuncu</span>
+              <span className="text-slate-500">|</span>
+              <span className="text-amber-400">{ping}ms</span>
+            </div>
+
+            <button
+              onClick={() => setShowPlayerList((p) => !p)}
+              className="px-2.5 py-1.5 bg-slate-900/85 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700/80 text-xs font-arcade shadow-lg transition-all active:scale-95 cursor-pointer"
+              title="Oyuncular Listesi [TAB]"
+            >
+              [TAB] Oyuncular
+            </button>
+
+            <button
+              onClick={() => {
+                setIsChatOpen((c) => !c);
+                if (document.pointerLockElement) document.exitPointerLock();
+              }}
+              className="px-2.5 py-1.5 bg-slate-900/85 hover:bg-slate-800 text-slate-300 hover:text-white rounded-lg border border-slate-700/80 text-xs font-arcade shadow-lg transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
+              title="Sunucu Sohbeti [T]"
+            >
+              <span>[T] Sohbet</span>
+            </button>
+
+            <button
+              onClick={() => setIsInviteOpen(true)}
+              className="px-2.5 py-1.5 bg-purple-900/80 hover:bg-purple-800 text-purple-200 hover:text-white rounded-lg border border-purple-600/80 text-xs font-arcade shadow-lg transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
+              title="Arkadaşını Çağır"
+            >
+              <Users className="w-3.5 h-3.5 text-purple-300" />
+              <span>Davet Et</span>
+            </button>
+          </div>
           {/* Crosshair (Minecraft Classic Cross) */}
           <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <div className="relative w-4 h-4 flex items-center justify-center">
               <div className="w-3.5 h-0.5 bg-white/90 drop-shadow" />
               <div className="h-3.5 w-0.5 bg-white/90 absolute drop-shadow" />
-            </div>
-          </div>
-
-          {/* Top HUD: Score & Mining Stats */}
-          <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none">
-            <div className="flex items-center gap-2 bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-emerald-500/30 shadow-lg">
-              <Box className="w-4 h-4 text-emerald-400" />
-              <span className="text-xs font-bold text-white uppercase">MINECRAFT 3D VOXEL</span>
-            </div>
-
-            <div className="flex items-center gap-3 bg-slate-950/85 backdrop-blur-md px-4 py-1.5 rounded-xl border border-slate-800 shadow-lg">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
-                <Award className="w-4 h-4" />
-                <span>{score.toLocaleString()} PUAN</span>
-              </div>
-              <span className="text-slate-600">|</span>
-              <div className="flex items-center gap-1 text-xs font-bold text-cyan-400">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{diamondsFound} Elmas</span>
-              </div>
-              <span className="text-slate-600">|</span>
-              <div className="flex items-center gap-1 text-xs font-bold text-slate-300">
-                <Pickaxe className="w-3.5 h-3.5 text-amber-400" />
-                <span>{blocksMined} Kırıldı</span>
-              </div>
             </div>
           </div>
 
@@ -1874,15 +2395,16 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
             <div className="flex items-center gap-1 bg-slate-950/90 backdrop-blur-md p-1.5 rounded-2xl border-2 border-slate-700 shadow-2xl">
               {hotbarSlots.map((blk, idx) => {
-                const def = BLOCK_DEFS[blk];
-                const isSelected = selectedBlock === blk;
+                const isSelected = selectedBlock === blk && blk !== null;
                 return (
                   <button
                     key={idx}
-                    draggable
+                    draggable={blk !== null}
                     onDragStart={(e) => {
-                      setDraggedItem(blk);
-                      e.dataTransfer.effectAllowed = 'move';
+                      if (blk) {
+                        setDraggedItem(blk);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }
                     }}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => {
@@ -1897,8 +2419,10 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                       }
                     }}
                     onClick={() => {
-                      setSelectedBlock(blk);
-                      sound.playTone(500, 'sine', 0.05, 0.15);
+                      if (blk) {
+                        setSelectedBlock(blk);
+                        sound.playTone(500, 'sine', 0.05, 0.15);
+                      }
                     }}
                     className={`relative w-10 sm:w-12 h-10 sm:h-12 rounded-xl flex flex-col items-center justify-center transition-all ${
                       isSelected
@@ -1906,39 +2430,24 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                         : 'border border-slate-800 bg-slate-900/60 hover:bg-slate-800/80 hover:scale-100'
                     }`}
                   >
-                    {/* Beautiful 3D Isometric Textured Icon */}
-                    <MinecraftBlockIcon type={blk} size={28} />
-                    <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-slate-400">
-                      {idx + 1}
-                    </span>
-                    <span className="absolute top-0.5 left-1 text-[9px] font-mono font-bold text-white">
-                      {inventory[blk]}
-                    </span>
+                    {blk ? (
+                      <>
+                        <MinecraftBlockIcon type={blk} size={28} />
+                        <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-slate-400">
+                          {idx + 1}
+                        </span>
+                        <span className="absolute top-0.5 left-1 text-[9px] font-mono font-bold text-white">
+                          {inventory[blk]}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-[9px] font-mono font-bold text-slate-600">
+                        {idx + 1}
+                      </span>
+                    )}
                   </button>
                 );
               })}
-            </div>
-
-            {/* Selected Block Info & Camera Switch */}
-            <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-4 py-2 rounded-xl border-2 border-amber-500 shadow-2xl z-50 text-xs">
-              <span className="text-emerald-400 font-bold">
-                Seçili: {BLOCK_DEFS[selectedBlock].name}
-              </span>
-              <span className="text-slate-600">·</span>
-              <button
-                onClick={() => setCameraView((v) => (v === 'first' ? 'third' : 'first'))}
-                className="flex items-center gap-1 text-slate-100 hover:text-white"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                <span>[C] {cameraView === 'first' ? '3. Şahıs (Steve)' : '1. Şahıs'}</span>
-              </button>
-              <button
-                onClick={() => setShowCrafting(!showCrafting)}
-                className="flex items-center gap-1 text-amber-400 hover:text-amber-300"
-              >
-                <Hammer className="w-3.5 h-3.5" />
-                <span>[E] Envanter</span>
-              </button>
             </div>
           </div>
 
@@ -2056,8 +2565,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                   <span className="text-[10px] font-arcade text-slate-700 mb-1 block">Hotbar (Hızlı Erişim - Drop Slotu)</span>
                   <div className="grid grid-cols-8 gap-1 bg-[#8b8b8b] p-1.5 border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white">
                     {hotbarSlots.map((blk, idx) => {
-                      const def = BLOCK_DEFS[blk];
-                      const isSelected = selectedBlock === blk;
+                      const isSelected = selectedBlock === blk && blk !== null;
                       return (
                         <div 
                           key={idx} 
@@ -2074,18 +2582,23 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                             }
                           }}
                           onClick={() => {
-                            setSelectedBlock(blk);
-                            sound.playTone(520, 'sine', 0.05, 0.12);
+                            if (blk) {
+                              setSelectedBlock(blk);
+                              sound.playTone(520, 'sine', 0.05, 0.12);
+                            }
                           }}
                           className={`w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex flex-col items-center justify-center hover:bg-slate-300 cursor-pointer relative ${
                             isSelected ? 'bg-amber-400/20 border-amber-400' : ''
                           }`}
                         >
-                          {/* Beautiful 3D Isometric Textured Icon */}
-                          <MinecraftBlockIcon type={blk} size={20} />
-                          <span className="absolute bottom-0.5 right-0.5 text-[7px] font-bold text-white bg-slate-900/60 px-0.5 rounded">
-                            {inventory[blk] || 0}
-                          </span>
+                          {blk ? (
+                            <>
+                              <MinecraftBlockIcon type={blk} size={20} />
+                              <span className="absolute bottom-0.5 right-0.5 text-[7px] font-bold text-white bg-slate-900/60 px-0.5 rounded">
+                                {inventory[blk] || 0}
+                              </span>
+                            </>
+                          ) : null}
                           <span className="absolute top-0.5 left-0.5 text-[7px] font-bold text-slate-400">
                             {idx + 1}
                           </span>
@@ -2114,13 +2627,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
             </div>
           )}
 
-          {/* Online Players indicator */}
-          <div className="absolute top-14 left-3 pointer-events-none">
-            <div className="bg-slate-950/80 backdrop-blur-md px-2.5 py-1 rounded-lg border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{players.size + 1} Mimar Çevrimiçi</span>
-            </div>
-          </div>
+
 
           {/* ESC / Pause Menu Overlay (only if inventory is closed) */}
           {isPaused && !showCrafting && (
@@ -2166,6 +2673,18 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                 </div>
 
                 <button
+                  onClick={toggleFullscreen}
+                  className="w-full py-2 bg-[#9333ea] hover:bg-[#a855f7] text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-xs tracking-wider shadow-md rounded-none flex items-center justify-center gap-2 cursor-pointer transition-all"
+                >
+                  {isFullscreen ? <Minimize className="w-3.5 h-3.5 text-amber-300" /> : <Maximize className="w-3.5 h-3.5 text-amber-300" />}
+                  <span>{isFullscreen ? 'Normal Ekrana Dön' : 'Tam Ekran Modu'}</span>
+                </button>
+
+                <div className="text-[9px] font-mono text-purple-200/90 bg-purple-950/60 py-1.5 px-2 border border-purple-500/30">
+                  [E] Envanter · [C / F5] Bakış Açısı · [F / F11] Tam Ekran
+                </div>
+
+                <button
                   onClick={() => {
                     if (confirm("Lobiye geri dönmek istiyor musunuz? İlerlemeniz kaydedilecektir.")) {
                       setGameStarted(false);
@@ -2183,6 +2702,129 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                   <p className="text-[9px] text-[#f3e8ff] font-arcade leading-relaxed">
                     Usta bir mimar ol, yeni dünyalar yarat ve en yüksek skora ulaş!
                   </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* In-Game Minecraft Chat Overlay & Input */}
+          <div className="absolute bottom-20 left-4 z-40 max-w-sm w-full pointer-events-auto flex flex-col gap-1.5 select-none font-mono text-xs">
+            {/* Recent chat log */}
+            <div className="flex flex-col gap-1 max-h-36 overflow-y-auto pointer-events-none p-1">
+              {chatMessages.slice(-6).map((msg, i) => (
+                <div
+                  key={i}
+                  className="bg-black/65 text-white px-2.5 py-1 rounded border border-white/10 backdrop-blur-sm animate-fade-in inline-block shadow-md"
+                >
+                  <span style={{ color: msg.color || '#38bdf8' }} className="font-bold mr-1.5">
+                    &lt;{msg.name}&gt;
+                  </span>
+                  <span className="text-slate-100">{msg.text}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Active Chat Input Bar */}
+            {isChatOpen && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (chatInputText.trim()) {
+                    sendChat(chatInputText.trim());
+                    setChatInputText('');
+                  }
+                  setIsChatOpen(false);
+                  containerRef.current?.requestPointerLock?.();
+                }}
+                className="flex items-center gap-1.5 bg-slate-950/90 border-2 border-amber-400 p-1.5 rounded-lg shadow-2xl backdrop-blur-md"
+              >
+                <span className="text-amber-400 font-arcade text-[10px] pl-1 font-bold">[Sohbet]:</span>
+                <input
+                  type="text"
+                  value={chatInputText}
+                  onChange={(e) => setChatInputText(e.target.value)}
+                  placeholder="Mesajınızı yazın ve Enter'a basın..."
+                  autoFocus
+                  maxLength={120}
+                  className="flex-1 bg-transparent text-white px-2 py-1 text-xs focus:outline-none font-sans"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs active:scale-95 cursor-pointer"
+                >
+                  Gönder
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsChatOpen(false);
+                    containerRef.current?.requestPointerLock?.();
+                  }}
+                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-xs cursor-pointer"
+                >
+                  ✕
+                </button>
+              </form>
+            )}
+          </div>
+
+          {/* TAB Menu: Online Connected Players Overlay */}
+          {showPlayerList && (
+            <div className="absolute inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-[#1e1b4b]/95 border-4 border-[#818cf8] p-5 max-w-md w-full shadow-2xl rounded-none text-white font-mono text-xs select-none">
+                <div className="flex justify-between items-center mb-4 border-b border-indigo-500/40 pb-2">
+                  <div>
+                    <h3 className="font-arcade text-sm text-yellow-300">MINECRAFT ONLINE ARENA</h3>
+                    <p className="text-[10px] text-indigo-300">Sunucudaki Aktif Oyuncular ({players.size + 1})</p>
+                  </div>
+                  <button
+                    onClick={() => setShowPlayerList(false)}
+                    className="px-2 py-1 bg-indigo-900 hover:bg-indigo-800 text-white rounded font-arcade text-xs border border-indigo-400 cursor-pointer"
+                  >
+                    Kapat [TAB]
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-2 max-h-60 overflow-y-auto">
+                  {/* Local Player */}
+                  <div className="flex items-center justify-between p-2.5 bg-emerald-950/60 border border-emerald-500/50 rounded">
+                    <div className="flex items-center gap-2.5">
+                      <div
+                        className="w-4 h-4 rounded-full border border-white"
+                        style={{ backgroundColor: playerColor }}
+                      />
+                      <span className="font-bold text-emerald-300">{playerName} (Sen)</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px]">
+                      <span className="text-yellow-400 font-arcade">{score} Puan</span>
+                      <span className="text-emerald-400">{ping}ms</span>
+                    </div>
+                  </div>
+
+                  {/* Remote Connected Players */}
+                  {Array.from(players.values()).map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between p-2.5 bg-slate-900/80 border border-slate-700 rounded hover:border-indigo-400"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div
+                          className="w-4 h-4 rounded-full border border-white/60"
+                          style={{ backgroundColor: p.color || '#38bdf8' }}
+                        />
+                        <span className="font-semibold text-slate-200">{p.name}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px]">
+                        <span className="text-yellow-400 font-arcade">{p.score || 0} Puan</span>
+                        <span className="text-emerald-400">Canlı</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-indigo-500/30 flex justify-between items-center text-[10px] text-indigo-300">
+                  <span>⚡ Socket.io Gerçek Zamanlı Blok & Oyuncu Senkronizasyonu</span>
+                  <span className="text-emerald-400 font-bold">● Canlı</span>
                 </div>
               </div>
             </div>

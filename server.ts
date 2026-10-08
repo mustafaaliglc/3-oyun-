@@ -51,6 +51,9 @@ const rooms: Record<string, RoomData> = {
   kart_racing: { players: new Map(), wsClients: new Map() },
 };
 
+// In-Memory Shared Minecraft Voxel World State
+const minecraftWorldBlocks = new Map<string, string>();
+
 app.use(express.json());
 
 function getRoomStats() {
@@ -176,6 +179,15 @@ io.on('connection', (socket: Socket) => {
       engine: 'Socket.io Server',
     });
 
+    // If joining Minecraft room, also send the current synchronized world blocks
+    if (roomName === 'minecraft') {
+      const blockEntries = Array.from(minecraftWorldBlocks.entries()).map(([k, type]) => {
+        const [x, y, z] = k.split(',').map(Number);
+        return { x, y, z, type };
+      });
+      socket.emit('mc_world_sync', { blocks: blockEntries });
+    }
+
     // Broadcast to others in the room
     socket.to(roomName).emit('player_joined', { player });
 
@@ -198,6 +210,7 @@ io.on('connection', (socket: Socket) => {
       if (data.health !== undefined) player.health = data.health;
       if (data.score !== undefined) player.score = data.score;
       if (data.wantedLevel !== undefined) player.wantedLevel = data.wantedLevel;
+      if (data.vehicle !== undefined) player.vehicle = data.vehicle;
       player.lastSeen = Date.now();
 
       socket.to(joinedRoom).emit('player_moved', {
@@ -210,13 +223,57 @@ io.on('connection', (socket: Socket) => {
         health: player.health,
         score: player.score,
         wantedLevel: player.wantedLevel,
+        vehicle: player.vehicle,
         action: data.action,
         timestamp: player.lastSeen,
       });
     }
   });
 
-  // 3. Chat Messages
+  // 3. Minecraft Real-time Block Placement
+  socket.on('mc_block_place', (data: { x: number; y: number; z: number; type: string }) => {
+    if (joinedRoom !== 'minecraft') return;
+    const rx = Math.round(data.x);
+    const ry = Math.round(data.y);
+    const rz = Math.round(data.z);
+    const key = `${rx},${ry},${rz}`;
+    minecraftWorldBlocks.set(key, data.type);
+
+    socket.to('minecraft').emit('mc_block_placed', {
+      x: rx,
+      y: ry,
+      z: rz,
+      type: data.type,
+      playerId: assignedPlayerId,
+    });
+  });
+
+  // 4. Minecraft Real-time Block Destruction / Mining
+  socket.on('mc_block_break', (data: { x: number; y: number; z: number }) => {
+    if (joinedRoom !== 'minecraft') return;
+    const rx = Math.round(data.x);
+    const ry = Math.round(data.y);
+    const rz = Math.round(data.z);
+    const key = `${rx},${ry},${rz}`;
+    minecraftWorldBlocks.set(key, 'air');
+
+    socket.to('minecraft').emit('mc_block_broken', {
+      x: rx,
+      y: ry,
+      z: rz,
+      playerId: assignedPlayerId,
+    });
+  });
+
+  // 5. Minecraft Real-time Player Punch / Arm Swing
+  socket.on('mc_player_punch', () => {
+    if (joinedRoom !== 'minecraft') return;
+    socket.to('minecraft').emit('mc_player_punched', {
+      id: assignedPlayerId,
+    });
+  });
+
+  // 6. Chat Messages
   socket.on('chat_message', (data: { text: string; name?: string; color?: string }) => {
     if (!joinedRoom || !rooms[joinedRoom]) return;
     const player = rooms[joinedRoom].players.get(assignedPlayerId);
