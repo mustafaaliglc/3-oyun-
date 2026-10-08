@@ -27,12 +27,15 @@ interface MinecraftGameProps {
 export type BlockType =
   | 'grass'
   | 'stone'
+  | 'dirt'
   | 'wood'
+  | 'birch'
   | 'leaves'
   | 'diamond'
   | 'glass'
   | 'brick'
-  | 'tnt';
+  | 'tnt'
+  | 'beef';
 
 interface BlockDef {
   id: BlockType;
@@ -45,17 +48,432 @@ interface BlockDef {
 }
 
 const BLOCK_DEFS: Record<BlockType, BlockDef> = {
-  grass: { id: 'grass', name: 'Çimen', color: '#78350f', topColor: '#22c55e', scoreVal: 10 },
-  stone: { id: 'stone', name: 'Taş', color: '#64748b', scoreVal: 15 },
-  wood: { id: 'wood', name: 'Odun', color: '#854d0e', scoreVal: 20 },
+  grass: { id: 'grass', name: 'Çimenli Toprak', color: '#78350f', topColor: '#22c55e', scoreVal: 10 },
+  stone: { id: 'stone', name: 'Kırıktaş', color: '#64748b', scoreVal: 15 },
+  dirt: { id: 'dirt', name: 'Toprak', color: '#7c2d12', scoreVal: 10 },
+  wood: { id: 'wood', name: 'Meşe Odunu', color: '#854d0e', scoreVal: 20 },
+  birch: { id: 'birch', name: 'Huş Odunu', color: '#f3f4f6', scoreVal: 20 },
   leaves: { id: 'leaves', name: 'Yaprak', color: '#15803d', scoreVal: 10 },
   diamond: { id: 'diamond', name: 'Elmas', color: '#06b6d4', scoreVal: 150 },
   glass: { id: 'glass', name: 'Cam', color: '#bae6fd', transparent: true, opacity: 0.55, scoreVal: 25 },
   brick: { id: 'brick', name: 'Tuğla', color: '#b91c1c', scoreVal: 30 },
   tnt: { id: 'tnt', name: 'TNT', color: '#ef4444', scoreVal: 50 },
+  beef: { id: 'beef', name: 'Çiğ Sığır Eti', color: '#f43f5e', scoreVal: 20 },
 };
 
-const HOTBAR_BLOCKS: BlockType[] = ['grass', 'stone', 'wood', 'leaves', 'diamond', 'glass', 'brick', 'tnt'];
+const INITIAL_HOTBAR: BlockType[] = ['grass', 'stone', 'dirt', 'wood', 'birch', 'leaves', 'diamond', 'tnt'];
+
+const MinecraftHeart: React.FC<{ fill: 'full' | 'half' | 'empty' }> = ({ fill }) => {
+  const fillColor = fill === 'empty' ? '#1e293b' : '#E11D48';
+  return (
+    <svg className="w-3.5 h-3.5 drop-shadow shrink-0 animate-pulse" viewBox="0 0 9 9" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M1 0H3V1H4V2H5V1H6V0H8V1H9V4H8V5H7V6H6V7H5V8H4V7H3V6H2V5H1V4H0V1H1V0Z" fill="#000000" />
+      {fill === 'half' ? (
+        <>
+          <path d="M1 1H3V2H4V3H5V6H4V6H3V5H2V4H1V1Z" fill="#E11D48" />
+          <path d="M2 4H3V5H4V6H5V6V4H2Z" fill="#9F1239" />
+          <path d="M5 2H6V1H8V4H7V5H6V6H5V2Z" fill="#1E293B" />
+        </>
+      ) : (
+        <path d="M1 1H3V2H4V3H5V2H6V1H8V4H7V5H6V6H5V7H4V6H3V5H2V4H1V1Z" fill={fillColor} />
+      )}
+      {fill === 'full' && (
+        <>
+          <rect x="2" y="1" width="1" height="1" fill="#FFFFFF" />
+          <rect x="1" y="2" width="1" height="1" fill="#FFFFFF" />
+        </>
+      )}
+    </svg>
+  );
+};
+
+const MinecraftHunger: React.FC<{ fill: 'full' | 'half' | 'empty' }> = ({ fill }) => {
+  const fillColor = fill === 'empty' ? '#1e293b' : '#B45309';
+  return (
+    <svg className="w-3.5 h-3.5 drop-shadow shrink-0" viewBox="0 0 9 9" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 0H5V1H6V2H7V3H8V5H7V6H6V7H5V8H4V9H3V7H2V6H1V5H0V3H1V2H2V1H3V0Z" fill="#000000" />
+      {fill === 'half' ? (
+        <>
+          <path d="M3 1H5V2H6V3H5V7H4V8H3V7H2V6H1V5H2V3H3V1Z" fill="#B45309" />
+          <path d="M3 6H4V7H5V6H5V4H3V6Z" fill="#78350F" />
+          <path d="M5 3H7V5H6V6H5V3Z" fill="#1E293B" />
+        </>
+      ) : (
+        <path d="M3 1H5V2H6V3H7V5H6V6H5V7H4V8H3V7H2V6H1V5H2V3H3V1Z" fill={fillColor} />
+      )}
+      {fill !== 'empty' && <path d="M1 5H2V6H1V5ZM0 6H1V7H0V6Z" fill="#E2E8F0" />}
+    </svg>
+  );
+};
+
+const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bottom') => {
+  const size = 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.Texture();
+
+  // Create a 16x16 pixel art
+  const imgData = ctx.createImageData(size, size);
+  const data = imgData.data;
+
+  const setPixel = (x: number, y: number, r: number, g: number, b: number) => {
+    const idx = (y * size + x) * 4;
+    data[idx] = r;
+    data[idx + 1] = g;
+    data[idx + 2] = b;
+    data[idx + 3] = 255;
+  };
+
+  if (type === 'stone') {
+    // Cobblestone (Kırıktaş) - Gray cobbles with dark borders (Matching uploaded image 1)
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const isBorder = (y === 0 || y === 8 || x === 0 || x === 8 || (y < 8 && x === 4) || (y >= 8 && x === 12));
+        const rFactor = Math.sin(x * 12.3) * Math.cos(y * 7.7) * 12 + Math.random() * 8;
+        if (isBorder) {
+          setPixel(x, y, 78 + rFactor, 78 + rFactor, 78 + rFactor); // Dark gray mortar/joint outlines
+        } else {
+          setPixel(x, y, 126 + rFactor, 126 + rFactor, 126 + rFactor); // Cobble rock center
+        }
+      }
+    }
+  } else if (type === 'grass') {
+    if (face === 'top') {
+      // Grass Top - Lush vibrant green (Matching uploaded image 2)
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const rFactor = Math.sin(x * 14.2) * Math.cos(y * 9.1) * 14 + Math.random() * 10;
+          setPixel(x, y, 76 + rFactor, 180 + rFactor * 0.8, 55 + rFactor * 0.5);
+        }
+      }
+    } else if (face === 'bottom') {
+      // Dirt (Bottom) - Rich brown soil (Matching uploaded image 3)
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const rFactor = Math.sin(x * 9.4) * Math.cos(y * 12.1) * 15 + Math.random() * 10;
+          setPixel(x, y, 98 + rFactor, 66 + rFactor, 43 + rFactor);
+        }
+      }
+    } else {
+      // Grass Side - Green hanging grass on brown dirt (Matching uploaded image 2 side)
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const baseGrassDepth = 4;
+          const isGrass = y < baseGrassDepth || 
+            (y === 4 && (x % 3 === 0 || x % 5 === 1)) || 
+            (y === 5 && (x === 3 || x === 10 || x === 14));
+          const rFactor = Math.sin(x * 9.4) * Math.cos(y * 12.1) * 12 + Math.random() * 8;
+          if (isGrass) {
+            setPixel(x, y, 76 + rFactor, 180 + rFactor * 0.8, 55 + rFactor * 0.5); // Green grass
+          } else {
+            setPixel(x, y, 98 + rFactor, 66 + rFactor, 43 + rFactor); // Brown dirt
+          }
+        }
+      }
+    }
+  } else if (type === 'dirt') {
+    // Dirt (Toprak) - Brown earthy pixels with occasional pebble stones (Matching uploaded image 3)
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const rFactor = Math.sin(x * 11.2) * Math.cos(y * 13.4) * 15 + Math.random() * 12;
+        const isPebble = (x === 3 && y === 4) || (x === 11 && y === 12) || (x === 7 && y === 2);
+        if (isPebble) {
+          setPixel(x, y, 125 + rFactor * 0.4, 125 + rFactor * 0.4, 125 + rFactor * 0.4); // Pebble gray
+        } else {
+          setPixel(x, y, 98 + rFactor, 66 + rFactor, 43 + rFactor); // Dirt body
+        }
+      }
+    }
+  } else if (type === 'wood') {
+    // Oak Log (Meşe Odunu) (Matching uploaded image 4)
+    if (face === 'top' || face === 'bottom') {
+      // Tree rings (inner wood cross-section)
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const dx = x - 7.5;
+          const dy = y - 7.5;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const isRing = Math.floor(dist) % 2 === 0;
+          if (isRing) {
+            setPixel(x, y, 192, 154, 114); // Inner cream body
+          } else {
+            setPixel(x, y, 142, 102, 64);  // Wood ring border
+          }
+        }
+      }
+    } else {
+      // Wood Side: Vertical dark bark strips
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const isDarkStrip = (x === 2 || x === 6 || x === 10 || x === 14);
+          const rFactor = Math.sin(y * 5.4) * 8 + Math.random() * 8;
+          if (isDarkStrip) {
+            setPixel(x, y, 62 + rFactor, 42 + rFactor, 28 + rFactor); // Vertical dark grooves
+          } else {
+            setPixel(x, y, 103 + rFactor, 76 + rFactor, 48 + rFactor); // Brown bark
+          }
+        }
+      }
+    }
+  } else if (type === 'birch') {
+    // Birch Log (Huş Odunu) (Matching uploaded image 5)
+    if (face === 'top' || face === 'bottom') {
+      // Birch rings (light cream cross section)
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const dx = x - 7.5;
+          const dy = y - 7.5;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const isRing = Math.floor(dist) % 3 === 0;
+          if (isRing) {
+            setPixel(x, y, 225, 210, 185); // Cream ring
+          } else {
+            setPixel(x, y, 198, 178, 148); // Sandy beige ring
+          }
+        }
+      }
+    } else {
+      // Wood Side: White birch bark with black horizontal notches
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const isNotch = (y === 3 && x >= 2 && x <= 6) || 
+            (y === 11 && x >= 10 && x <= 14) || 
+            (y === 7 && (x <= 2 || x >= 13)) ||
+            (y === 14 && x >= 5 && x <= 9);
+          const rFactor = Math.random() * 10;
+          if (isNotch) {
+            setPixel(x, y, 36 + rFactor, 36 + rFactor, 36 + rFactor); // Black notch
+          } else {
+            setPixel(x, y, 226 + rFactor, 222 + rFactor, 206 + rFactor); // White birch bark
+          }
+        }
+      }
+    }
+  } else if (type === 'diamond') {
+    // Glowing diamond ores
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const rFactor = Math.sin(x * 12.3) * Math.cos(y * 8.8) * 15 + Math.random() * 10;
+        const isGlow = (x === 3 && y === 3) || (x === 4 && y === 2) || (x === 11 && y === 10) || (x === 12 && y === 9);
+        if (isGlow) {
+          setPixel(x, y, 255, 255, 255);
+        } else {
+          setPixel(x, y, 34 + rFactor * 0.5, 197 + rFactor * 0.8, 218 + rFactor);
+        }
+      }
+    }
+  } else if (type === 'glass') {
+    // Beautiful transparent glass textures
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const isBorder = (x === 0 || y === 0 || x === 15 || y === 15);
+        const isHighlight = (x === y && x >= 3 && x <= 6) || (x === y - 5 && x >= 8 && x <= 10);
+        const idx = (y * size + x) * 4;
+        if (isBorder) {
+          data[idx] = 186; data[idx + 1] = 230; data[idx + 2] = 253; data[idx + 3] = 180;
+        } else if (isHighlight) {
+          data[idx] = 255; data[idx + 1] = 255; data[idx + 2] = 255; data[idx + 3] = 255;
+        } else {
+          data[idx] = 224; data[idx + 1] = 242; data[idx + 2] = 254; data[idx + 3] = 30; // transparent air
+        }
+      }
+    }
+  } else if (type === 'brick') {
+    // Red clay bricks
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const isMortar = (y % 4 === 0) || (y < 4 && x === 4) || (y >= 4 && y < 8 && x === 12) || (y >= 8 && y < 12 && x === 4) || (y >= 12 && x === 12);
+        const rFactor = Math.random() * 15;
+        if (isMortar) {
+          setPixel(x, y, 212, 212, 212); // Gray mortar
+        } else {
+          setPixel(x, y, 172 + rFactor, 52 + rFactor, 42 + rFactor); // Red brick body
+        }
+      }
+    }
+  } else if (type === 'tnt') {
+    // TNT explosives with red blocks and white stripe containing black TNT letters
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const isWhiteStripe = (y >= 5 && y <= 9);
+        const isT1 = (y === 6 && x >= 2 && x <= 4) || (x === 3 && y >= 6 && y <= 8);
+        const isN = (x === 5 && y >= 6 && y <= 8) || (x === 7 && y >= 6 && y <= 8) || (x === 6 && y === 7);
+        const isT2 = (y === 6 && x >= 8 && x <= 10) || (x === 9 && y >= 6 && y <= 8);
+        const isText = isWhiteStripe && (isT1 || isN || isT2);
+
+        const rFactor = Math.random() * 12;
+        if (isText) {
+          setPixel(x, y, 0, 0, 0); // Black "TNT" lettering
+        } else if (isWhiteStripe) {
+          setPixel(x, y, 240 + rFactor, 240 + rFactor, 240 + rFactor); // White central band
+        } else {
+          setPixel(x, y, 220 + rFactor, 40 + rFactor, 40 + rFactor); // Red dynamite sticks
+        }
+      }
+    }
+  } else if (type === 'beef') {
+    // Raw Beef (Et) - Diagonal red ribeye meat with bone tips (Matching uploaded image 2)
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        // Pixel-art diagonal raw steak
+        const isBone = (x === y && (x <= 3 || x >= 12)) || (x === y + 1 && (x <= 3 || x >= 12)) || (x === y - 1 && (x <= 3 || x >= 12));
+        const isMeat = !isBone && (x + y >= 8 && x + y <= 22 && Math.abs(x - y) <= 5);
+        const rFactor = Math.random() * 15;
+        const idx = (y * size + x) * 4;
+        
+        if (isBone) {
+          // White bone tips
+          setPixel(x, y, 245 + rFactor, 245 + rFactor, 245 + rFactor);
+        } else if (isMeat) {
+          // Rich red/pink raw meat
+          setPixel(x, y, 230 + rFactor, 60 + rFactor, 70 + rFactor);
+        } else {
+          // Transparent empty space
+          data[idx] = 0; data[idx+1] = 0; data[idx+2] = 0; data[idx+3] = 0;
+        }
+      }
+    }
+  } else {
+    // Leaves (Green with transparent spaces)
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const isHole = Math.random() < 0.12;
+        if (isHole) {
+          const idx = (y * size + x) * 4;
+          data[idx] = 16; data[idx + 1] = 90; data[idx + 2] = 24; data[idx + 3] = 40;
+        } else {
+          const g = 110 + Math.floor(Math.random() * 35);
+          setPixel(x, y, Math.floor(g * 0.15), g, Math.floor(g * 0.15));
+        }
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+};
+
+const MinecraftBlockIcon: React.FC<{ type: BlockType; size?: number }> = ({ type, size = 24 }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, size, size);
+
+    // Retrieve the canvas image generated by our actual texture generator
+    const getFaceImage = (faceType: BlockType, faceName?: 'top' | 'side' | 'bottom') => {
+      const tex = generateMinecraftTexture(faceType, faceName);
+      return tex.image as HTMLCanvasElement;
+    };
+
+    const topCanvas = getFaceImage(type, 'top');
+    const sideCanvas = getFaceImage(type, 'side');
+
+    if (!topCanvas || !sideCanvas) return;
+
+    ctx.imageSmoothingEnabled = false;
+
+    if (type === 'beef') {
+      // Beef is flat, just draw it flat in the slot center
+      ctx.drawImage(topCanvas, size * 0.1, size * 0.1, size * 0.8, size * 0.8);
+    } else {
+      // Draw 3D cube isometric outline
+      const hw = size / 2;
+      const hh = size / 2;
+
+      // Draw Top Face (Rhombus shape)
+      ctx.save();
+      ctx.translate(hw, hh - size * 0.18);
+      ctx.scale(1, 0.5);
+      ctx.rotate(-Math.PI / 4);
+      ctx.drawImage(topCanvas, -hw * 0.65, -hh * 0.65, hw * 1.3, hh * 1.3);
+      ctx.restore();
+
+      // Draw Left Face (skewed)
+      ctx.save();
+      ctx.translate(hw - size * 0.22, hh + size * 0.15);
+      ctx.transform(1, 0.5, 0, 1, 0, 0); // skew vertical
+      ctx.scale(0.5, 0.65);
+      ctx.drawImage(sideCanvas, -hw, -hh, size, size);
+      ctx.restore();
+
+      // Draw Right Face (skewed with shadow)
+      ctx.save();
+      ctx.translate(hw + size * 0.22, hh + size * 0.15);
+      ctx.transform(1, -0.5, 0, 1, 0, 0); // skew vertical
+      ctx.scale(0.5, 0.65);
+      ctx.drawImage(sideCanvas, -hw, -hh, size, size);
+      
+      // Shadow overlay for right face
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+      ctx.fillRect(-hw, -hh, size, size);
+      ctx.restore();
+    }
+  }, [type, size]);
+
+  return (
+    <canvas 
+      ref={canvasRef} 
+      width={size} 
+      height={size} 
+      style={{ imageRendering: 'pixelated' }}
+      className="shrink-0 select-none pointer-events-none" 
+    />
+  );
+};
+
+const generateCowTexture = (part: 'body' | 'head' | 'leg') => {
+  const size = 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.Texture();
+  
+  const imgData = ctx.createImageData(size, size);
+  const data = imgData.data;
+  
+  const setPixel = (x: number, y: number, r: number, g: number, b: number) => {
+    const idx = (y * size + x) * 4;
+    data[idx] = r;
+    data[idx + 1] = g;
+    data[idx + 2] = b;
+    data[idx + 3] = 255;
+  };
+
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const isWhitePatch = (Math.sin(x * 0.85) * Math.cos(y * 0.85) > 0.08) || (x % 7 === 0 && y % 5 === 0);
+      if (part === 'head' && y >= 11 && x >= 4 && x <= 11) {
+        // Pink snout (muzzle)
+        setPixel(x, y, 244, 143, 177);
+      } else if (isWhitePatch) {
+        // White patches (cow spots)
+        setPixel(x, y, 226, 220, 213);
+      } else {
+        // Cow brown fur (Matching uploaded image 1)
+        setPixel(x, y, 92, 64, 51);
+      }
+    }
+  }
+  
+  ctx.putImageData(imgData, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  return texture;
+};
 
 export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   game,
@@ -64,9 +482,30 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Player state
+  // Game state
+  const [gameStarted, setGameStarted] = useState<boolean>(false);
+  const [hotbarSlots, setHotbarSlots] = useState<BlockType[]>(INITIAL_HOTBAR);
+  const hotbarSlotsRef = useRef<BlockType[]>(INITIAL_HOTBAR);
+
+  useEffect(() => {
+    hotbarSlotsRef.current = hotbarSlots;
+  }, [hotbarSlots]);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const [playerName, setPlayerName] = useState<string>('Steve_Builder');
   const [selectedBlock, setSelectedBlock] = useState<BlockType>('grass');
+  
+  // Survival States: Health (Hearts) & Hunger (Shanks)
+  const [health, setHealth] = useState<number>(20); // Max 20 (10 hearts)
+  const [hunger, setHunger] = useState<number>(20); // Max 20 (10 shanks)
+  const hungerTimerRef = useRef<number>(0);
+  
+  // Real-time synchronous inventory to prevent race conditions or negative counts
+  const inventoryRef = useRef<Record<BlockType, number>>({
+    grass: 10, stone: 10, dirt: 15, wood: 10, birch: 10, leaves: 5, diamond: 0, glass: 0, brick: 0, tnt: 0, beef: 0
+  });
+  const [inventory, setInventory] = useState<Record<BlockType, number>>(inventoryRef.current);
+  const [draggedItem, setDraggedItem] = useState<BlockType | null>(null);
+  const [showCrafting, setShowCrafting] = useState<boolean>(false);
   const [score, setScore] = useState<number>(0);
   const [blocksMined, setBlocksMined] = useState<number>(0);
   const [blocksPlaced, setBlocksPlaced] = useState<number>(0);
@@ -82,8 +521,83 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     steeringSensitivity: 2,
   });
 
+  // Handle pointer lock release and pause when inventory is opened
+  useEffect(() => {
+    if (showCrafting) {
+      if (document.pointerLockElement === containerRef.current) {
+        document.exitPointerLock();
+      }
+      setIsPaused(true);
+    } else {
+      setIsPaused(false);
+    }
+  }, [showCrafting]);
+
+  // Synchronous Inventory Action Handlers to prevent negative/race-condition counts
+  const addToInventory = useCallback((type: BlockType) => {
+    const current = inventoryRef.current[type] || 0;
+    inventoryRef.current[type] = current + 1;
+    setInventory({ ...inventoryRef.current });
+  }, []);
+
+  const removeFromInventory = useCallback((type: BlockType): boolean => {
+    const current = inventoryRef.current[type] || 0;
+    if (current > 0) {
+      inventoryRef.current[type] = current - 1;
+      setInventory({ ...inventoryRef.current });
+      return true;
+    }
+    inventoryRef.current[type] = 0;
+    setInventory({ ...inventoryRef.current });
+    return false;
+  }, []);
+
+  const craftBlock = useCallback((from: BlockType, to: BlockType, cost: number) => {
+    const currentFrom = inventoryRef.current[from] || 0;
+    if (currentFrom >= cost) {
+      inventoryRef.current[from] = currentFrom - cost;
+      inventoryRef.current[to] = (inventoryRef.current[to] || 0) + 1;
+      setInventory({ ...inventoryRef.current });
+      sound.playBonus();
+    }
+  }, []);
+
+  // Real-time Hunger & Starvation loop
+  useEffect(() => {
+    if (!gameStarted || isPaused) return;
+
+    const interval = setInterval(() => {
+      setHunger((prev) => {
+        const next = Math.max(0, prev - 1);
+        if (next === 0) {
+          // Take starvation damage if hungry
+          setHealth((h) => {
+            const nextHealth = Math.max(0, h - 2);
+            if (nextHealth === 0) {
+              sound.playExplosion();
+              alert("❌ AÇLIKTAN ÖLDÜNÜZ! Steve lobi noktasında yeniden doğuyor...");
+              // Respawn
+              setHunger(20);
+              setScore(0);
+              playerPosRef.current.x = 0;
+              playerPosRef.current.y = 12;
+              playerPosRef.current.z = 0;
+              return 20; // Full health on respawn
+            } else {
+              sound.playTone(150, 'sawtooth', 0.15, 0.15); // Hunger damage ouch sound
+            }
+            return nextHealth;
+          });
+        }
+        return next;
+      });
+    }, 8000); // Lose 1 hunger point every 8 seconds
+
+    return () => clearInterval(interval);
+  }, [gameStarted, isPaused]);
+
   // Modals
-  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(true);
+  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false); // Changed from true to false, as we'll use StartScreen
   const [isInviteOpen, setIsInviteOpen] = useState<boolean>(false);
 
   // Multiplayer Hook
@@ -102,6 +616,53 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const highlightMeshRef = useRef<THREE.LineSegments | null>(null);
   const steveMeshRef = useRef<THREE.Group | null>(null);
   const animationFrameIdRef = useRef<number | null>(null);
+
+  // References for in-hand item rendering & animations
+  const firstPersonHeldRef = useRef<THREE.Mesh | null>(null);
+  const thirdPersonHeldRef = useRef<THREE.Mesh | null>(null);
+  const rightArmRef = useRef<THREE.Mesh | null>(null);
+  const punchAnimRef = useRef<number>(0); // 0 to 1 for punching chop animation
+
+  // Mobs and Items trackers
+  interface CowMob {
+    id: string;
+    mesh: THREE.Group;
+    x: number;
+    y: number;
+    z: number;
+    targetX: number;
+    targetZ: number;
+    idleTimer: number;
+    health: number;
+    legFL: THREE.Mesh;
+    legFR: THREE.Mesh;
+    legBL: THREE.Mesh;
+    legBR: THREE.Mesh;
+    flashTimer: number;
+  }
+
+  interface DropItem {
+    id: string;
+    mesh: THREE.Group;
+    x: number;
+    y: number;
+    z: number;
+    type: 'beef';
+  }
+
+  const mobsRef = useRef<CowMob[]>([]);
+  const dropsRef = useRef<DropItem[]>([]);
+
+  // Resize handler
+  const handleResize = useCallback(() => {
+    const container = containerRef.current;
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    if (!container || !renderer || !camera) return;
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+  }, []);
 
   // Player physics
   const playerPosRef = useRef({
@@ -133,43 +694,41 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       return materialsCacheRef.current.get(type)!;
     }
 
-    const def = BLOCK_DEFS[type];
     if (type === 'grass') {
-      const topMat = new THREE.MeshStandardMaterial({ color: def.topColor, roughness: 0.85 });
-      const sideMat = new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.9 });
-      const bottomMat = new THREE.MeshStandardMaterial({ color: def.color, roughness: 0.9 });
+      const topTex = generateMinecraftTexture('grass', 'top');
+      const bottomTex = generateMinecraftTexture('grass', 'bottom');
+      const sideTex = generateMinecraftTexture('grass', 'side');
+
+      const topMat = new THREE.MeshStandardMaterial({ map: topTex, roughness: 0.95 });
+      const bottomMat = new THREE.MeshStandardMaterial({ map: bottomTex, roughness: 0.9 });
+      const sideMat = new THREE.MeshStandardMaterial({ map: sideTex, roughness: 0.9 });
+
+      // Order of faces: Right, Left, Top, Bottom, Front, Back
       const mats = [sideMat, sideMat, topMat, bottomMat, sideMat, sideMat];
       materialsCacheRef.current.set(type, mats);
       return mats;
     }
 
-    if (type === 'glass') {
-      const mat = new THREE.MeshPhysicalMaterial({
-        color: def.color,
-        transmission: 0.7,
-        opacity: def.opacity,
-        transparent: true,
-        roughness: 0.1,
-      });
-      materialsCacheRef.current.set(type, mat);
-      return mat;
+    if (type === 'wood' || type === 'birch') {
+      const topTex = generateMinecraftTexture(type, 'top');
+      const sideTex = generateMinecraftTexture(type, 'side');
+
+      const topMat = new THREE.MeshStandardMaterial({ map: topTex, roughness: 0.9 });
+      const sideMat = new THREE.MeshStandardMaterial({ map: sideTex, roughness: 0.9 });
+
+      const mats = [sideMat, sideMat, topMat, topMat, sideMat, sideMat];
+      materialsCacheRef.current.set(type, mats);
+      return mats;
     }
 
-    if (type === 'diamond') {
-      const mat = new THREE.MeshStandardMaterial({
-        color: def.color,
-        roughness: 0.3,
-        metalness: 0.4,
-        emissive: '#0891b2',
-        emissiveIntensity: 0.3,
-      });
-      materialsCacheRef.current.set(type, mat);
-      return mat;
-    }
-
+    // Default single-texture blocks (Kırıktaş, Toprak, Yaprak, Elmas, Cam, Tuğla, TNT)
+    const tex = generateMinecraftTexture(type);
     const mat = new THREE.MeshStandardMaterial({
-      color: def.color,
-      roughness: 0.8,
+      map: tex,
+      roughness: type === 'glass' ? 0.1 : 0.85,
+      metalness: type === 'diamond' ? 0.35 : 0.05,
+      transparent: type === 'glass' || type === 'leaves',
+      opacity: type === 'glass' ? 0.65 : 1.0,
     });
     materialsCacheRef.current.set(type, mat);
     return mat;
@@ -196,15 +755,19 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     torso.position.y = 1.4;
     steve.add(torso);
 
-    // Left & Right Arms
+    // Left Arm
     const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
     const armL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.2, 0.35), armMat);
     armL.position.set(-0.65, 1.4, 0);
     steve.add(armL);
 
-    const armR = armL.clone();
-    armR.position.x = 0.65;
+    // Right Arm (Unique mesh with translated shoulder pivot)
+    const armRGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+    armRGeo.translate(0, -0.4, 0); // Translate geometry down to move pivot to shoulder
+    const armR = new THREE.Mesh(armRGeo, armMat);
+    armR.position.set(0.65, 1.8, 0); // Position at shoulder height
     steve.add(armR);
+    rightArmRef.current = armR; // Save ref for held item attachment
 
     // Blue Pants & Legs
     const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
@@ -269,7 +832,159 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     }
   }, [removeBlock]);
 
-  // Initialize Three.js Voxel Terrain
+  // Cow 3D Mesh Generator
+  const createCowMesh = useCallback(() => {
+    const cow = new THREE.Group();
+
+    // Body
+    const bodyTex = generateCowTexture('body');
+    const bodyMat = new THREE.MeshStandardMaterial({ map: bodyTex, roughness: 0.8 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.7, 1.3), bodyMat);
+    body.position.y = 0.85;
+    cow.add(body);
+
+    // Head
+    const headTex = generateCowTexture('head');
+    const headMat = new THREE.MeshStandardMaterial({ map: headTex, roughness: 0.8 });
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), headMat);
+    head.position.set(0, 1.25, -0.7);
+    cow.add(head);
+
+    // Snout
+    const snoutMat = new THREE.MeshStandardMaterial({ color: '#f48fb1', roughness: 0.8 });
+    const snout = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.2, 0.15), snoutMat);
+    snout.position.set(0, 1.1, -0.95);
+    cow.add(snout);
+
+    // Horns
+    const hornMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.9 });
+    const hornL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.1), hornMat);
+    hornL.position.set(-0.3, 1.55, -0.7);
+    cow.add(hornL);
+
+    const hornR = hornL.clone();
+    hornR.position.x = 0.3;
+    cow.add(hornR);
+
+    // Legs
+    const legTex = generateCowTexture('leg');
+    const legMat = new THREE.MeshStandardMaterial({ map: legTex, roughness: 0.8 });
+    
+    const legFL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.6, 0.24), legMat);
+    legFL.position.set(-0.33, 0.3, -0.45);
+    cow.add(legFL);
+
+    const legFR = legFL.clone();
+    legFR.position.x = 0.33;
+    cow.add(legFR);
+
+    const legBL = legFL.clone();
+    legBL.position.z = 0.45;
+    cow.add(legBL);
+
+    const legBR = legFR.clone();
+    legBR.position.z = 0.45;
+    cow.add(legBR);
+
+    return {
+      group: cow,
+      legFL,
+      legFR,
+      legBL,
+      legBR,
+    };
+  }, []);
+
+  // Spawn Cows across the world on the surface
+  const spawnCows = useCallback((count: number) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    // Clear existing
+    mobsRef.current.forEach((mob) => scene.remove(mob.mesh));
+    mobsRef.current = [];
+
+    for (let i = 0; i < count; i++) {
+      const rx = Math.floor(Math.random() * 32) - 16;
+      const rz = Math.floor(Math.random() * 32) - 16;
+      
+      const hill = Math.floor(Math.sin(rx * 0.28) * Math.cos(rz * 0.28) * 2.5 + 2);
+      const ry = Math.max(0, hill) + 1.0;
+
+      const cowData = createCowMesh();
+      cowData.group.position.set(rx, ry, rz);
+      
+      const mobId = `cow_${Math.random().toString(36).substr(2, 9)}`;
+      cowData.group.name = mobId;
+      scene.add(cowData.group);
+
+      mobsRef.current.push({
+        id: mobId,
+        mesh: cowData.group,
+        x: rx,
+        y: ry,
+        z: rz,
+        targetX: rx + (Math.random() * 12 - 6),
+        targetZ: rz + (Math.random() * 12 - 6),
+        idleTimer: Math.random() * 6 + 2,
+        health: 4,
+        legFL: cowData.legFL,
+        legFR: cowData.legFR,
+        legBL: cowData.legBL,
+        legBR: cowData.legBR,
+        flashTimer: 0,
+      });
+    }
+  }, [createCowMesh]);
+
+  // Terrain Generator
+  const generateWorld = useCallback((worldSize: number) => {
+    for (let x = -worldSize; x <= worldSize; x++) {
+      for (let z = -worldSize; z <= worldSize; z++) {
+        // Height formula: wavy rolling hills
+        const hill = Math.floor(Math.sin(x * 0.28) * Math.cos(z * 0.28) * 2.5 + 2);
+        const surfaceY = Math.max(0, hill);
+
+        // Bedrock & Stone layer (Kırıktaş)
+        for (let y = 0; y < surfaceY - 2; y++) {
+          const isDiamond = Math.random() < 0.035 && y <= 1;
+          addBlock(x, y, z, isDiamond ? 'diamond' : 'stone');
+        }
+
+        // Dirt layers immediately under the grass (Toprak)
+        for (let y = Math.max(0, surfaceY - 2); y < surfaceY; y++) {
+          addBlock(x, y, z, 'dirt');
+        }
+
+        // Top Grass Block (Çimenli Toprak)
+        addBlock(x, surfaceY, z, 'grass');
+
+        // Spawn occasional Trees (Oak Wood or Birch Wood)
+        if (Math.random() < 0.035 && Math.abs(x) > 2 && Math.abs(z) > 2) {
+          const trunkBase = surfaceY + 1;
+          const isBirch = Math.random() < 0.45;
+          const woodType = isBirch ? 'birch' : 'wood';
+
+          for (let ty = 0; ty < 4; ty++) {
+            addBlock(x, trunkBase + ty, z, woodType);
+          }
+          // Leaves canopy
+          const leafY = trunkBase + 4;
+          for (let lx = -1; lx <= 1; lx++) {
+            for (let lz = -1; lz <= 1; lz++) {
+              for (let ly = 0; ly <= 1; ly++) {
+                if (!(lx === 0 && lz === 0 && ly === 0)) {
+                  addBlock(x + lx, leafY + ly, z + lz, 'leaves');
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }, [addBlock]);
+
+  // Initialize Three.js Scene, Camera, Renderer
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -302,46 +1017,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     sun.position.set(40, 60, 30);
     scene.add(sun);
 
-    // 5. Build Procedural Voxel Terrain (28 x 28 area with hills and trees)
-    const worldSize = 14;
-    for (let x = -worldSize; x <= worldSize; x++) {
-      for (let z = -worldSize; z <= worldSize; z++) {
-        // Height formula: wavy rolling hills
-        const dist = Math.hypot(x, z);
-        const hill = Math.floor(Math.sin(x * 0.28) * Math.cos(z * 0.28) * 2.5 + 2);
-        const surfaceY = Math.max(0, hill);
-
-        // Bedrock & Stone layer
-        for (let y = 0; y < surfaceY; y++) {
-          const isDiamond = Math.random() < 0.04 && y <= 1;
-          addBlock(x, y, z, isDiamond ? 'diamond' : 'stone');
-        }
-
-        // Top Grass Block
-        addBlock(x, surfaceY, z, 'grass');
-
-        // Spawn occasional Trees
-        if (Math.random() < 0.035 && Math.abs(x) > 2 && Math.abs(z) > 2) {
-          const trunkBase = surfaceY + 1;
-          for (let ty = 0; ty < 4; ty++) {
-            addBlock(x, trunkBase + ty, z, 'wood');
-          }
-          // Leaves canopy
-          const leafY = trunkBase + 4;
-          for (let lx = -1; lx <= 1; lx++) {
-            for (let lz = -1; lz <= 1; lz++) {
-              for (let ly = 0; ly <= 1; ly++) {
-                if (!(lx === 0 && lz === 0 && ly === 0)) {
-                  addBlock(x + lx, leafY + ly, z + lz, 'leaves');
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // 6. Highlight Selection Box (Wireframe for targeted voxel face)
+    // 6. Highlight Selection Box
     const wireGeo = new THREE.BoxGeometry(1.02, 1.02, 1.02);
     const wireEdges = new THREE.EdgesGeometry(wireGeo);
     const wireMat = new THREE.LineBasicMaterial({ color: '#000000', linewidth: 2 });
@@ -350,18 +1026,12 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     scene.add(highlightBox);
     highlightMeshRef.current = highlightBox;
 
-    // 7. Steve 3D mesh (For third person view)
+    // 7. Steve 3D mesh
     const steve = createSteveMesh();
     scene.add(steve);
     steveMeshRef.current = steve;
 
     // Resize
-    const handleResize = () => {
-      if (!container || !renderer || !camera) return;
-      camera.aspect = container.clientWidth / container.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(container.clientWidth, container.clientHeight);
-    };
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -372,12 +1042,97 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         container.removeChild(renderer.domElement);
       }
     };
-  }, [addBlock]);
+  }, [handleResize]); // Run only once, but depend on handleResize
+
+  // Trigger world generation when game starts
+  useEffect(() => {
+    if (gameStarted) {
+      generateWorld(24); // Increased size from 14 to 24
+      spawnCows(8); // Spawn 8 cute cow mobs!
+      handleResize(); // Ensure renderer is resized when it becomes visible
+    }
+  }, [gameStarted, generateWorld, spawnCows, handleResize]);
+
+  // Update Held Block items in Player's Hand (First Person and Third Person)
+  const updateHeldItems = useCallback(() => {
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    if (!scene) return;
+
+    // 1. First-Person View Held Block (attached directly to camera for movement sync)
+    if (firstPersonHeldRef.current) {
+      if (firstPersonHeldRef.current.parent) {
+        firstPersonHeldRef.current.parent.remove(firstPersonHeldRef.current);
+      }
+      firstPersonHeldRef.current.geometry.dispose();
+      firstPersonHeldRef.current = null;
+    }
+
+    if (camera && cameraView === 'first' && gameStarted) {
+      const geo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
+      const mat = getBlockMaterial(selectedBlock);
+      const mesh = new THREE.Mesh(geo, mat);
+      
+      // Position at bottom-right corner of camera
+      mesh.position.set(0.26, -0.22, -0.42);
+      mesh.rotation.set(0.18, -0.35, 0.08); // beautiful isometric hand holding angle
+      camera.add(mesh);
+      firstPersonHeldRef.current = mesh;
+    }
+
+    // 2. Third-Person View Held Block (attached to Steve's right hand armR)
+    if (thirdPersonHeldRef.current) {
+      if (thirdPersonHeldRef.current.parent) {
+        thirdPersonHeldRef.current.parent.remove(thirdPersonHeldRef.current);
+      }
+      thirdPersonHeldRef.current.geometry.dispose();
+      thirdPersonHeldRef.current = null;
+    }
+
+    if (rightArmRef.current && gameStarted) {
+      const geo = new THREE.BoxGeometry(0.24, 0.24, 0.24);
+      const mat = getBlockMaterial(selectedBlock);
+      const mesh = new THREE.Mesh(geo, mat);
+      
+      // Position at the very end of right hand
+      mesh.position.set(0, -0.65, -0.15);
+      rightArmRef.current.add(mesh);
+      thirdPersonHeldRef.current = mesh;
+
+      // Raise right arm forward to point / hold the block
+      rightArmRef.current.rotation.x = -Math.PI / 3.5;
+    }
+  }, [selectedBlock, cameraView, gameStarted, getBlockMaterial]);
+
+  // Synchronize held items on state change
+  useEffect(() => {
+    updateHeldItems();
+  }, [selectedBlock, cameraView, gameStarted, updateHeldItems]);
+
+  // Handle pointer lock changes for pause menu
+  useEffect(() => {
+    const handlePointerLockChange = () => {
+      if (document.pointerLockElement !== containerRef.current && gameStarted) {
+        setIsPaused(true);
+      } else if (document.pointerLockElement === containerRef.current && gameStarted) {
+        setIsPaused(false);
+      }
+    };
+    document.addEventListener('pointerlockchange', handlePointerLockChange);
+    return () => {
+      document.removeEventListener('pointerlockchange', handlePointerLockChange);
+    };
+  }, [gameStarted]);
+
+  const resumeGame = useCallback(() => {
+    setIsPaused(false);
+    containerRef.current?.requestPointerLock?.();
+  }, []);
 
   // Pointer lock & Mouse click interactions (Left click mine, Right click place)
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || !gameStarted) return; // Only enable if game started
 
     const handleMouseMove = (e: MouseEvent) => {
       if (document.pointerLockElement !== container) return;
@@ -393,7 +1148,33 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       const scene = sceneRef.current;
       if (!camera || !scene) return;
 
-      // Raycast 6 blocks forward
+      // Trigger punch/swing animation on Left-Click
+      if (e.button === 0) {
+        punchAnimRef.current = 1.0;
+      }
+
+      // Handle eating raw beef on Right-Click at any time
+      if (e.button === 2 && selectedBlock === 'beef') {
+        e.preventDefault();
+        const beefCount = inventoryRef.current['beef'] || 0;
+        if (beefCount > 0) {
+          removeFromInventory('beef');
+          
+          // Crunchy eating sounds
+          sound.playTone(180, 'triangle', 0.05, 0.06);
+          setTimeout(() => sound.playTone(140, 'triangle', 0.05, 0.06), 100);
+          setTimeout(() => sound.playTone(160, 'triangle', 0.05, 0.06), 200);
+          setTimeout(() => sound.playTone(220, 'sine', 0.08, 0.12), 300); // swallowing tone
+
+          setHunger((h) => Math.min(20, h + 6)); // Restore 3 hunger shanks
+          setHealth((h) => Math.min(20, h + 4)); // Restore 2 hearts (4 HP)
+        } else {
+          sound.playTone(200, 'sawtooth', 0.1, 0.1);
+        }
+        return;
+      }
+
+      // Raycast 7 blocks forward
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
       raycaster.far = 7;
@@ -401,10 +1182,77 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       const blockMeshes: THREE.Mesh[] = [];
       worldBlocksRef.current.forEach((val) => blockMeshes.push(val.mesh));
 
-      const intersects = raycaster.intersectObjects(blockMeshes, false);
-      if (intersects.length === 0) return;
+      const cowGroups = mobsRef.current.map((mob) => mob.mesh);
 
-      const hit = intersects[0];
+      // Raycast against both blocks and cows
+      const intersectsBlocks = raycaster.intersectObjects(blockMeshes, false);
+      const intersectsCows = raycaster.intersectObjects(cowGroups, true);
+
+      const hitBlock = intersectsBlocks.length > 0 ? intersectsBlocks[0] : null;
+      const hitCow = intersectsCows.length > 0 ? intersectsCows[0] : null;
+
+      // ATTACK COW MOB IF CLOSER THAN THE NEAREST BLOCK
+      if (hitCow && (!hitBlock || hitCow.distance < hitBlock.distance)) {
+        if (e.button === 0) {
+          const hitSubmesh = hitCow.object;
+          let parentGroup: THREE.Object3D | null = hitSubmesh;
+          while (parentGroup && !parentGroup.name.startsWith('cow_') && parentGroup.parent !== scene) {
+            parentGroup = parentGroup.parent;
+          }
+
+          const cowMob = mobsRef.current.find((mob) => mob.mesh === parentGroup || mob.id === parentGroup?.name);
+          if (cowMob) {
+            // Damage cow
+            cowMob.health -= 1;
+            cowMob.flashTimer = 0.45; // flash red
+            sound.playTone(180, 'sawtooth', 0.12, 0.2); // Cow hurt sound
+
+            // Knockback effect
+            const pushForce = 0.8;
+            const angle = camera.rotation.y;
+            cowMob.targetX -= Math.sin(angle) * pushForce;
+            cowMob.targetZ -= Math.cos(angle) * pushForce;
+
+            // Check if cow died
+            if (cowMob.health <= 0) {
+              sound.playTone(120, 'sine', 0.25, 0.4); // Cow death sound
+
+              // Spawn spinning raw beef drop item
+              const beefGroup = new THREE.Group();
+              const beefMat = getBlockMaterial('beef');
+              const beefMesh = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.1), beefMat);
+              beefGroup.add(beefMesh);
+              beefGroup.position.set(cowMob.x, cowMob.y, cowMob.z);
+              scene.add(beefGroup);
+
+              dropsRef.current.push({
+                id: `drop_${Math.random().toString(36).substr(2, 9)}`,
+                mesh: beefGroup,
+                x: cowMob.x,
+                y: cowMob.y,
+                z: cowMob.z,
+                type: 'beef',
+              });
+
+              // Clean up cow mesh
+              scene.remove(cowMob.mesh);
+              mobsRef.current = mobsRef.current.filter((mob) => mob.id !== cowMob.id);
+
+              setScore((s) => {
+                const newScore = s + 50; // Kill reward
+                onUpdateHighScore(newScore);
+                return newScore;
+              });
+            }
+          }
+        }
+        return;
+      }
+
+      // BLOCKS INTERACTIONS (ONLY IF WE ARE NOT INTERACTING WITH A COW)
+      if (!hitBlock) return;
+
+      const hit = hitBlock;
       const hitPos = hit.point.clone().sub(hit.face!.normal.clone().multiplyScalar(0.1));
       const bx = Math.round(hitPos.x);
       const by = Math.round(hitPos.y);
@@ -414,6 +1262,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         // LEFT CLICK: MINE / BREAK BLOCK
         const minedType = removeBlock(bx, by, bz);
         if (minedType) {
+          addToInventory(minedType); // Add to inventory
           if (minedType === 'tnt') {
             explodeTnt(bx, by, bz);
           } else {
@@ -434,22 +1283,28 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       } else if (e.button === 2) {
         // RIGHT CLICK: PLACE SELECTED BLOCK ON FACE
         e.preventDefault();
-        const placePos = hit.point.clone().add(hit.face!.normal.clone().multiplyScalar(0.4));
-        const px = Math.round(placePos.x);
-        const py = Math.round(placePos.y);
-        const pz = Math.round(placePos.z);
+        if (removeFromInventory(selectedBlock)) { // Remove from inventory
+          const placePos = hit.point.clone().add(hit.face!.normal.clone().multiplyScalar(0.4));
+          const px = Math.round(placePos.x);
+          const py = Math.round(placePos.y);
+          const pz = Math.round(placePos.z);
 
-        // Don't place inside player
-        const player = playerPosRef.current;
-        if (Math.hypot(px - player.x, pz - player.z) > 0.6 || Math.abs(py - player.y) > 1.8) {
-          addBlock(px, py, pz, selectedBlock);
-          sound.playTone(450, 'triangle', 0.07, 0.2);
-          setBlocksPlaced((p) => p + 1);
-          setScore((s) => {
-            const newScore = s + 5;
-            onUpdateHighScore(newScore);
-            return newScore;
-          });
+          // Don't place inside player
+          const player = playerPosRef.current;
+          if (Math.hypot(px - player.x, pz - player.z) > 0.6 || Math.abs(py - player.y) > 1.8) {
+            addBlock(px, py, pz, selectedBlock);
+            sound.playTone(450, 'triangle', 0.07, 0.2);
+            setBlocksPlaced((p) => p + 1);
+            setScore((s) => {
+              const newScore = s + 5;
+              onUpdateHighScore(newScore);
+              return newScore;
+            });
+          } else {
+            addToInventory(selectedBlock); // Refund if unable to place
+          }
+        } else {
+          sound.playTone(200, 'sawtooth', 0.1, 0.1); // No block sound
         }
       }
     };
@@ -473,7 +1328,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       container.removeEventListener('contextmenu', handleContextMenu);
       container.removeEventListener('click', handleClick);
     };
-  }, [addBlock, removeBlock, explodeTnt, selectedBlock, onUpdateHighScore]);
+  }, [gameStarted, addBlock, removeBlock, explodeTnt, selectedBlock, onUpdateHighScore]);
 
   // Keyboard controls
   useEffect(() => {
@@ -483,12 +1338,15 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       if (k === 's' || e.key === 'ArrowDown') keysRef.current.s = true;
       if (k === 'a' || e.key === 'ArrowLeft') keysRef.current.a = true;
       if (k === 'd' || e.key === 'ArrowRight') keysRef.current.d = true;
-      if (e.code === 'Space') keysRef.current.space = true;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        keysRef.current.space = true;
+      }
 
       // Hotbar selection keys 1 - 8
       const num = parseInt(k, 10);
       if (num >= 1 && num <= 8) {
-        setSelectedBlock(HOTBAR_BLOCKS[num - 1]);
+        setSelectedBlock(hotbarSlotsRef.current[num - 1]);
         sound.playTone(520, 'sine', 0.05, 0.15);
       }
 
@@ -496,6 +1354,11 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       if (k === 'c' || e.key === 'F5') {
         e.preventDefault();
         setCameraView((v) => (v === 'first' ? 'third' : 'first'));
+      }
+      // Crafting menu toggle
+      if (k === 'e') {
+        e.preventDefault();
+        setShowCrafting((prev) => !prev);
       }
     };
 
@@ -518,18 +1381,149 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
   // Main Minecraft Game Loop & Voxel Physics
   useEffect(() => {
+    if (!gameStarted) return;
     let lastTime = performance.now();
 
     const animate = () => {
+      const camera = cameraRef.current;
+      const scene = sceneRef.current;
+      const renderer = rendererRef.current;
+
+      if (isPaused) {
+        if (renderer && scene && camera) {
+          renderer.render(scene, camera);
+        }
+        animationFrameIdRef.current = requestAnimationFrame(animate);
+        return;
+      }
+
       const now = performance.now();
       const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
+      // 1. Update Cow Mobs AI and legs animations
+      const mobs = mobsRef.current;
+      const sceneInstance = sceneRef.current;
+      const time = now * 0.003; // For swing animations
+
+      mobs.forEach((mob) => {
+        // AI Pathfinding & Movement
+        mob.idleTimer -= dt;
+        if (mob.idleTimer <= 0) {
+          // Select new random walk target within bounds
+          mob.targetX = mob.x + (Math.random() * 12 - 6);
+          mob.targetZ = mob.z + (Math.random() * 12 - 6);
+          mob.idleTimer = Math.random() * 6 + 3;
+        }
+
+        // Damage flash timer
+        if (mob.flashTimer > 0) {
+          mob.flashTimer -= dt;
+          // Set to reddish color
+          mob.mesh.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              const mat = child.material;
+              if (mat) {
+                if (Array.isArray(mat)) {
+                  mat.forEach((m: any) => m.color?.setHex(0xff3333));
+                } else {
+                  (mat as any).color?.setHex(0xff3333);
+                }
+              }
+            }
+          });
+        } else {
+          // Reset material colors to white
+          mob.mesh.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              const mat = child.material;
+              if (mat) {
+                if (Array.isArray(mat)) {
+                  mat.forEach((m: any) => m.color?.setHex(0xffffff));
+                } else {
+                  (mat as any).color?.setHex(0xffffff);
+                }
+              }
+            }
+          });
+        }
+
+        // Movement step towards target
+        const dx = mob.targetX - mob.x;
+        const dz = mob.targetZ - mob.z;
+        const dist = Math.hypot(dx, dz);
+
+        let isWalking = false;
+        if (dist > 0.2) {
+          isWalking = true;
+          const speed = 1.2; // slow cute cow pace
+          const moveStepX = (dx / dist) * speed * dt;
+          const moveStepZ = (dz / dist) * speed * dt;
+          
+          mob.x += moveStepX;
+          mob.z += moveStepZ;
+
+          // Align rotation with direction of walk
+          const angle = Math.atan2(dx, dz);
+          mob.mesh.rotation.y = angle + Math.PI;
+        }
+
+        // Snap cow perfectly on top of physical terrain
+        const cx = Math.round(mob.x);
+        const cz = Math.round(mob.z);
+        let groundHeight = 0;
+        for (let y = 15; y >= 0; y--) {
+          const key = `${cx},${y},${cz}`;
+          if (worldBlocksRef.current.has(key)) {
+            groundHeight = y + 1.0;
+            break;
+          }
+        }
+        mob.y = THREE.MathUtils.lerp(mob.y, groundHeight, 0.2); // smooth vertical leveling
+        mob.mesh.position.set(mob.x, mob.y - 0.5, mob.z);
+
+        // swing legs
+        if (isWalking) {
+          const swing = Math.sin(time * 4) * 0.45;
+          mob.legFL.rotation.x = swing;
+          mob.legFR.rotation.x = -swing;
+          mob.legBL.rotation.x = -swing;
+          mob.legBR.rotation.x = swing;
+        } else {
+          mob.legFL.rotation.x = 0;
+          mob.legFR.rotation.x = 0;
+          mob.legBL.rotation.x = 0;
+          mob.legBR.rotation.x = 0;
+        }
+      });
+
+      // 2. Update Spinning/Bobbing Beef drops
+      const drops = dropsRef.current;
+      const playerPos = playerPosRef.current;
+
+      for (let i = drops.length - 1; i >= 0; i--) {
+        const drop = drops[i];
+        
+        drop.mesh.rotation.y += 1.8 * dt;
+        drop.mesh.position.y = drop.y + Math.sin(now * 0.005) * 0.08;
+
+        const distToPlayer = Math.hypot(drop.x - playerPos.x, drop.z - playerPos.z);
+        const verticalDist = Math.abs(drop.y - playerPos.y);
+
+        if (distToPlayer < 1.1 && verticalDist < 1.8) {
+          // Pickup drop!
+          addToInventory('beef');
+          sound.playTone(600, 'sine', 0.05, 0.1);
+          
+          if (sceneInstance) {
+            sceneInstance.remove(drop.mesh);
+          }
+          drops.splice(i, 1);
+        }
+      }
+
       const pos = playerPosRef.current;
       const keys = keysRef.current;
-      const camera = cameraRef.current;
-      const scene = sceneRef.current;
-      const renderer = rendererRef.current;
       const steve = steveMeshRef.current;
       const highlight = highlightMeshRef.current;
 
@@ -551,8 +1545,27 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         const sinYaw = Math.sin(pos.yaw);
         const cosYaw = Math.cos(pos.yaw);
 
-        pos.x += (dx * cosYaw + dz * sinYaw) * moveSpeed * dt;
-        pos.z += (dz * cosYaw - dx * sinYaw) * moveSpeed * dt;
+        const stepX = (dx * cosYaw + dz * sinYaw) * moveSpeed * dt;
+        const stepZ = (dz * cosYaw - dx * sinYaw) * moveSpeed * dt;
+
+        const nextX = pos.x + stepX;
+        const nextZ = pos.z + stepZ;
+
+        // Check if a block at a coordinate is solid/exists
+        const isSolid = (x: number, y: number, z: number) => {
+          const key = `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
+          return worldBlocksRef.current.has(key);
+        };
+
+        // Check collision at player's foot and head height
+        const feetY = Math.round(pos.y - 1);
+        const headY = Math.round(pos.y);
+
+        const collidesX = isSolid(nextX, feetY, pos.z) || isSolid(nextX, headY, pos.z);
+        const collidesZ = isSolid(pos.x, feetY, nextZ) || isSolid(pos.x, headY, nextZ);
+
+        if (!collidesX) pos.x = nextX;
+        if (!collidesZ) pos.z = nextZ;
       }
 
       // Voxel Ground Collision & Gravity
@@ -560,8 +1573,8 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       const footBlockZ = Math.round(pos.z);
       let groundY = 0;
 
-      // Find highest block below player feet
-      for (let y = Math.floor(pos.y + 1); y >= 0; y--) {
+      // Find highest block below player feet (strictly starting from pos.y - 1.0 to prevent climbing walls/trees)
+      for (let y = Math.floor(pos.y - 1.0); y >= 0; y--) {
         const key = `${footBlockX},${y},${footBlockZ}`;
         if (worldBlocksRef.current.has(key)) {
           groundY = y + 1.5; // stand on top of block
@@ -613,6 +1626,53 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         steve.visible = cameraView === 'third';
       }
 
+      // 3. Animate Hand-Held Items & Swinging
+      if (firstPersonHeldRef.current && cameraView === 'first') {
+        if (punchAnimRef.current > 0) {
+          punchAnimRef.current = Math.max(0, punchAnimRef.current - dt * 6.5);
+        }
+        
+        // Walk bobbing effect (slight sinusoidal wobble of the hand)
+        const isWalking = dx !== 0 || dz !== 0;
+        const bobX = isWalking ? Math.sin(now * 0.012) * 0.015 : 0;
+        const bobY = isWalking ? Math.cos(now * 0.024) * 0.012 : 0;
+
+        // Click swing offset math
+        const swing = Math.sin(punchAnimRef.current * Math.PI) * 0.45;
+
+        // Position holding offsets (right-bottom corner + walk bobbing + strike swing)
+        firstPersonHeldRef.current.position.set(
+          0.26 + bobX - swing * 0.18, 
+          -0.22 + bobY - swing * 0.18, 
+          -0.42 + swing * 0.1
+        );
+
+        // Rotation angles: tilt isometric + rapid strike downward rotation
+        firstPersonHeldRef.current.rotation.set(
+          0.18 + swing * 1.3, 
+          -0.35 - swing * 0.5, 
+          0.08 - swing * 0.8
+        );
+      }
+
+      if (steve && cameraView === 'third' && rightArmRef.current) {
+        if (punchAnimRef.current > 0) {
+          punchAnimRef.current = Math.max(0, punchAnimRef.current - dt * 6.5);
+        }
+        // Walk swing vs punching swing in third person
+        const isWalking = dx !== 0 || dz !== 0;
+        const swing = Math.sin(punchAnimRef.current * Math.PI);
+        
+        if (punchAnimRef.current > 0) {
+          rightArmRef.current.rotation.x = -Math.PI / 3.5 - swing * 1.2;
+        } else if (isWalking) {
+          rightArmRef.current.rotation.x = -Math.PI / 3.5 + Math.sin(now * 0.015) * 0.15;
+        } else {
+          rightArmRef.current.rotation.x = -Math.PI / 3.5;
+        }
+      }
+
+      // Camera view toggle can now also update held items
       // Update Camera Position
       if (camera) {
         camera.rotation.order = 'YXZ';
@@ -653,110 +1713,482 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return () => {
       if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
     };
-  }, [cameraView, selectedBlock, score, sendUpdate]);
+  }, [gameStarted, cameraView, selectedBlock, score, sendUpdate, isPaused]);
 
   return (
     <div className="relative w-full aspect-16/10 sm:aspect-16/9 bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 shadow-2xl select-none">
       {/* 3D WebGL Canvas */}
-      <div ref={containerRef} className="w-full h-full cursor-crosshair" />
+      <div ref={containerRef} className={`w-full h-full cursor-crosshair ${gameStarted ? '' : 'hidden'}`} />
 
-      {/* Crosshair (Minecraft Classic Cross) */}
-      <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-        <div className="relative w-4 h-4 flex items-center justify-center">
-          <div className="w-3.5 h-0.5 bg-white/90 drop-shadow" />
-          <div className="h-3.5 w-0.5 bg-white/90 absolute drop-shadow" />
-        </div>
-      </div>
-
-      {/* Top HUD: Score & Mining Stats */}
-      <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none">
-        <div className="flex items-center gap-2 bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-emerald-500/30 shadow-lg">
-          <Box className="w-4 h-4 text-emerald-400" />
-          <span className="text-xs font-bold text-white uppercase">MINECRAFT 3D VOXEL</span>
-        </div>
-
-        <div className="flex items-center gap-3 bg-slate-950/85 backdrop-blur-md px-4 py-1.5 rounded-xl border border-slate-800 shadow-lg">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
-            <Award className="w-4 h-4" />
-            <span>{score.toLocaleString()} PUAN</span>
+      {/* Start Screen */}
+      {!gameStarted && (
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-950/80 via-slate-950 to-slate-950 flex flex-col items-center justify-center z-50 p-4 border border-purple-500/20 rounded-2xl overflow-hidden shadow-2xl">
+          {/* Animated Background overlay to give that dark crystal cave/dirt feeling */}
+          <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] pointer-events-none" />
+          
+          {/* Minecraft Title block */}
+          <div className="relative mb-8 text-center select-none scale-90 sm:scale-100 z-10">
+            <h1 className="font-arcade text-5xl md:text-6xl text-slate-300 drop-shadow-[0_4px_0_rgba(0,0,0,0.8)] tracking-wider">
+              MINECRAFT
+            </h1>
+            <div className="font-arcade text-[10px] text-slate-400 mt-2 tracking-widest uppercase">
+              JAVA EDITION
+            </div>
+            {/* Pulsing Splash Text */}
+            <div className="absolute -bottom-3 -right-6 rotate-[-15deg] font-arcade text-xs text-yellow-400 drop-shadow-[0_2px_0_rgba(0,0,0,1)] animate-bounce select-none">
+              Hi r/minecraft!!!
+            </div>
           </div>
-          <span className="text-slate-600">|</span>
-          <div className="flex items-center gap-1 text-xs font-bold text-cyan-400">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{diamondsFound} Elmas</span>
-          </div>
-          <span className="text-slate-600">|</span>
-          <div className="flex items-center gap-1 text-xs font-bold text-slate-300">
-            <Pickaxe className="w-3.5 h-3.5 text-amber-400" />
-            <span>{blocksMined} Kırıldı</span>
-          </div>
-        </div>
-      </div>
 
-      {/* TNT Banner */}
-      {tntNotice && (
-        <div className="absolute top-16 inset-x-0 flex justify-center pointer-events-none animate-bounce z-20">
-          <span className="px-5 py-1.5 rounded-xl text-xs font-black bg-rose-600/90 text-white shadow-xl border border-rose-300">
-            {tntNotice}
-          </span>
+          {/* Blocky Buttons Stack */}
+          <div className="flex flex-col gap-2.5 items-center w-full max-w-sm px-4 z-10">
+            <button
+              onClick={() => {
+                setGameStarted(true);
+                sound.playBonus();
+              }}
+              className="w-full py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] active:border-t-[#2a2a2a] active:border-l-[#2a2a2a] active:border-b-[#8a8a8a] active:border-r-[#8a8a8a] font-arcade text-xs tracking-wide shadow-md transition-all rounded-none cursor-pointer"
+            >
+              Singleplayer (Dünya Oluştur)
+            </button>
+
+            <button
+              onClick={() => alert("Çok Oyunculu mod lobi üzerinden canlıdır!")}
+              className="w-full py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-xs tracking-wide shadow-md rounded-none"
+            >
+              Multiplayer
+            </button>
+
+            <button
+              disabled
+              className="w-full py-2.5 bg-[#3a3a3a] text-slate-500 border-2 border-t-slate-600 border-l-slate-600 border-b-slate-800 border-r-slate-800 font-arcade text-xs tracking-wide cursor-not-allowed opacity-50 rounded-none"
+            >
+              Minecraft Realms
+            </button>
+
+            <div className="flex gap-2 w-full mt-1">
+              <button
+                onClick={() => setIsMenuOpen(true)}
+                className="flex-1 py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-xs tracking-wide shadow-md rounded-none"
+              >
+                Options...
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm("Oyundan çıkmak istiyor musunuz?")) {
+                    window.location.reload();
+                  }
+                }}
+                className="flex-1 py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-xs tracking-wide shadow-md rounded-none"
+              >
+                Quit Game
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Minecraft Hotbar (Slots 1 - 8) */}
-      <div className="absolute bottom-3 inset-x-0 flex flex-col items-center pointer-events-auto gap-2">
-        <div className="flex items-center gap-1 bg-slate-950/90 backdrop-blur-md p-1.5 rounded-2xl border-2 border-slate-700 shadow-2xl">
-          {HOTBAR_BLOCKS.map((blk, idx) => {
-            const def = BLOCK_DEFS[blk];
-            const isSelected = selectedBlock === blk;
-            return (
-              <button
-                key={blk}
-                onClick={() => {
-                  setSelectedBlock(blk);
-                  sound.playTone(500, 'sine', 0.05, 0.15);
-                }}
-                className={`relative w-10 sm:w-12 h-10 sm:h-12 rounded-xl flex flex-col items-center justify-center transition-all ${
-                  isSelected
-                    ? 'border-2 border-amber-400 bg-amber-500/20 scale-105 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
-                    : 'border border-slate-800 bg-slate-900/60 hover:bg-slate-800/80 hover:scale-100'
-                }`}
-              >
-                {/* 3D Mini Cube Icon */}
-                <div
-                  className="w-5 h-5 rounded-xs shadow-inner border border-black/30"
-                  style={{ backgroundColor: def.topColor || def.color }}
+      {/* Game UI - Only show when game is started */}
+      {gameStarted && (
+        <>
+          {/* Crosshair (Minecraft Classic Cross) */}
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <div className="relative w-4 h-4 flex items-center justify-center">
+              <div className="w-3.5 h-0.5 bg-white/90 drop-shadow" />
+              <div className="h-3.5 w-0.5 bg-white/90 absolute drop-shadow" />
+            </div>
+          </div>
+
+          {/* Top HUD: Score & Mining Stats */}
+          <div className="absolute top-3 inset-x-3 flex items-center justify-between pointer-events-none">
+            <div className="flex items-center gap-2 bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-emerald-500/30 shadow-lg">
+              <Box className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs font-bold text-white uppercase">MINECRAFT 3D VOXEL</span>
+            </div>
+
+            <div className="flex items-center gap-3 bg-slate-950/85 backdrop-blur-md px-4 py-1.5 rounded-xl border border-slate-800 shadow-lg">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
+                <Award className="w-4 h-4" />
+                <span>{score.toLocaleString()} PUAN</span>
+              </div>
+              <span className="text-slate-600">|</span>
+              <div className="flex items-center gap-1 text-xs font-bold text-cyan-400">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{diamondsFound} Elmas</span>
+              </div>
+              <span className="text-slate-600">|</span>
+              <div className="flex items-center gap-1 text-xs font-bold text-slate-300">
+                <Pickaxe className="w-3.5 h-3.5 text-amber-400" />
+                <span>{blocksMined} Kırıldı</span>
+              </div>
+            </div>
+          </div>
+
+          {/* TNT Banner */}
+          {tntNotice && (
+            <div className="absolute top-16 inset-x-0 flex justify-center pointer-events-none animate-bounce z-20">
+              <span className="px-5 py-1.5 rounded-xl text-xs font-black bg-rose-600/90 text-white shadow-xl border border-rose-300">
+                {tntNotice}
+              </span>
+            </div>
+          )}
+
+          {/* Minecraft Hotbar (Slots 1 - 8) */}
+          <div className="absolute bottom-3 inset-x-0 flex flex-col items-center pointer-events-auto gap-2">
+            
+            {/* Survival HUD: Hearts, Hunger, and XP Bar */}
+            <div className="flex flex-col items-center w-full max-w-[360px] select-none mb-0.5">
+              {/* Hearts (left) and Hunger (right) */}
+              <div className="flex justify-between w-full px-1.5 mb-1">
+                {/* 10 Hearts (Pixel-Art SVGs with dynamic health filling) */}
+                <div className="flex gap-0.5">
+                  {Array.from({ length: 10 }).map((_, i) => {
+                    const heartVal = health - i * 2;
+                    const fillType = heartVal >= 2 ? 'full' : heartVal === 1 ? 'half' : 'empty';
+                    return <MinecraftHeart key={i} fill={fillType} />;
+                  })}
+                </div>
+
+                {/* 10 Hunger Shanks (Pixel-Art SVGs with dynamic hunger emptying) */}
+                <div className="flex gap-0.5">
+                  {Array.from({ length: 10 }).map((_, i) => {
+                    const hungerVal = hunger - i * 2;
+                    const fillType = hungerVal >= 2 ? 'full' : hungerVal === 1 ? 'half' : 'empty';
+                    return <MinecraftHunger key={i} fill={fillType} />;
+                  })}
+                </div>
+              </div>
+
+              {/* Lime Green Experience (XP) Bar */}
+              <div className="relative w-full h-1.5 bg-slate-950 border border-slate-700 rounded-none overflow-hidden flex items-center justify-center">
+                <div 
+                  className="absolute left-0 top-0 bottom-0 bg-[#3c0] shadow-[0_0_6px_rgba(51,204,0,0.8)]"
+                  style={{ width: `${Math.min(100, (score % 100) || 20)}%` }}
                 />
-                <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-slate-400">
-                  {idx + 1}
+                {/* Level number centered above the bar */}
+                <span className="absolute text-[8px] font-arcade text-[#3c0] drop-shadow-[0_1px_1px_rgba(0,0,0,1)] z-10 bottom-0">
+                  {Math.floor(score / 100) + 1}
                 </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 bg-slate-950/90 backdrop-blur-md p-1.5 rounded-2xl border-2 border-slate-700 shadow-2xl">
+              {hotbarSlots.map((blk, idx) => {
+                const def = BLOCK_DEFS[blk];
+                const isSelected = selectedBlock === blk;
+                return (
+                  <button
+                    key={idx}
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggedItem(blk);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggedItem) {
+                        const newSlots = [...hotbarSlots];
+                        newSlots[idx] = draggedItem;
+                        setHotbarSlots(newSlots);
+                        setSelectedBlock(draggedItem);
+                        setDraggedItem(null);
+                        sound.playTone(500, 'sine', 0.05, 0.15);
+                      }
+                    }}
+                    onClick={() => {
+                      setSelectedBlock(blk);
+                      sound.playTone(500, 'sine', 0.05, 0.15);
+                    }}
+                    className={`relative w-10 sm:w-12 h-10 sm:h-12 rounded-xl flex flex-col items-center justify-center transition-all ${
+                      isSelected
+                        ? 'border-2 border-amber-400 bg-amber-500/20 scale-105 shadow-[0_0_12px_rgba(251,191,36,0.5)]'
+                        : 'border border-slate-800 bg-slate-900/60 hover:bg-slate-800/80 hover:scale-100'
+                    }`}
+                  >
+                    {/* Beautiful 3D Isometric Textured Icon */}
+                    <MinecraftBlockIcon type={blk} size={28} />
+                    <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-slate-400">
+                      {idx + 1}
+                    </span>
+                    <span className="absolute top-0.5 left-1 text-[9px] font-mono font-bold text-white">
+                      {inventory[blk]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Selected Block Info & Camera Switch */}
+            <div className="flex items-center gap-3 bg-slate-900/90 backdrop-blur-md px-4 py-2 rounded-xl border-2 border-amber-500 shadow-2xl z-50 text-xs">
+              <span className="text-emerald-400 font-bold">
+                Seçili: {BLOCK_DEFS[selectedBlock].name}
+              </span>
+              <span className="text-slate-600">·</span>
+              <button
+                onClick={() => setCameraView((v) => (v === 'first' ? 'third' : 'first'))}
+                className="flex items-center gap-1 text-slate-100 hover:text-white"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>[C] {cameraView === 'first' ? '3. Şahıs (Steve)' : '1. Şahıs'}</span>
               </button>
-            );
-          })}
-        </div>
+              <button
+                onClick={() => setShowCrafting(!showCrafting)}
+                className="flex items-center gap-1 text-amber-400 hover:text-amber-300"
+              >
+                <Hammer className="w-3.5 h-3.5" />
+                <span>[E] Envanter</span>
+              </button>
+            </div>
+          </div>
 
-        {/* Selected Block Info & Camera Switch */}
-        <div className="flex items-center gap-3 bg-slate-950/80 backdrop-blur-md px-3 py-1 rounded-xl border border-slate-800 text-xs">
-          <span className="text-emerald-400 font-bold">
-            Seçili: {BLOCK_DEFS[selectedBlock].name}
-          </span>
-          <span className="text-slate-600">·</span>
-          <button
-            onClick={() => setCameraView((v) => (v === 'first' ? 'third' : 'first'))}
-            className="flex items-center gap-1 text-slate-300 hover:text-white"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>[C] {cameraView === 'first' ? '3. Şahıs (Steve)' : '1. Şahıs'}</span>
-          </button>
-        </div>
-      </div>
+          {/* Classic Minecraft Survival Inventory & Crafting Panel */}
+          {showCrafting && (
+            <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#c6c6c6] border-4 border-t-white border-l-white border-b-[#555] border-r-[#555] p-5 w-full max-w-[440px] shadow-2xl rounded-none text-slate-800 select-none flex flex-col gap-4 relative font-mono text-xs">
+                
+                {/* Close Button x */}
+                <button 
+                  onClick={() => setShowCrafting(false)}
+                  className="absolute top-2 right-2 font-arcade text-xs text-slate-600 hover:text-black hover:bg-slate-300 px-1.5 py-0.5 border border-slate-400"
+                >
+                  X
+                </button>
 
-      {/* Online Players indicator */}
-      <div className="absolute top-14 left-3 pointer-events-none">
-        <div className="bg-slate-950/80 backdrop-blur-md px-2.5 py-1 rounded-lg border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1.5">
-          <Users className="w-3.5 h-3.5 text-emerald-400" />
-          <span>{players.size + 1} Mimar Çevrimiçi</span>
-        </div>
-      </div>
+                {/* Top Section: Armor, Preview, Crafting 2x2 */}
+                <div className="flex gap-4 items-start justify-between">
+                  {/* Left: Armor slots (4 square vertical slots) */}
+                  <div className="flex flex-col gap-1.5">
+                    {['helmet', 'chestplate', 'leggings', 'boots'].map((slot) => (
+                      <div 
+                        key={slot} 
+                        className="w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex items-center justify-center text-[10px] text-slate-500 font-bold uppercase font-mono"
+                      >
+                        {slot.slice(0, 2)}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Center: Steve 2D Preview (black rectangle) */}
+                  <div className="flex-1 max-w-[120px] h-[152px] bg-black border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex items-center justify-center relative overflow-hidden">
+                    {/* Retro Steve Pixel representation */}
+                    <div className="flex flex-col items-center gap-1 scale-110">
+                      {/* Head */}
+                      <div className="w-7 h-7 bg-[#fcd34d] border border-[#b45309]" />
+                      {/* Body (shirt) */}
+                      <div className="w-10 h-10 bg-[#0ea5e9] border border-[#0369a1] flex justify-between px-1">
+                        <div className="w-1.5 h-6 bg-[#fcd34d]" />
+                        <div className="w-1.5 h-6 bg-[#fcd34d]" />
+                      </div>
+                      {/* Pants */}
+                      <div className="w-9 h-10 bg-[#1e3a8a] border border-[#172554] flex justify-between px-2">
+                        <div className="w-2.5 h-full bg-[#1e3a8a]" />
+                        <div className="w-2.5 h-full bg-[#1e3a8a]" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Crafting 2x2 grid */}
+                  <div className="flex flex-col items-end">
+                    <span className="text-[10px] font-arcade text-slate-700 mb-1 mr-4">Crafting</span>
+                    <div className="flex items-center gap-3">
+                      {/* 2x2 slots */}
+                      <div className="grid grid-cols-2 gap-1 bg-[#8b8b8b] p-1 border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                          <div 
+                            key={i} 
+                            className="w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white hover:bg-slate-300 cursor-pointer"
+                          />
+                        ))}
+                      </div>
+                      
+                      {/* Crafting Arrow */}
+                      <div className="text-slate-600 font-bold text-lg select-none">➡</div>
+
+                      {/* Result Output slot */}
+                      <div className="w-11 h-11 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex items-center justify-center hover:bg-slate-300 cursor-pointer">
+                        <div className="w-7 h-7 bg-amber-400 border border-amber-600" title="Output slot" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Middle line separator */}
+                <div className="border-t-2 border-slate-400 my-1" />
+
+                {/* Bottom Section: Inventory Grid 3x9 */}
+                <div>
+                  <span className="text-[10px] font-arcade text-slate-700 mb-1 block">Inventory (Kuşanmak İçin Sürükleyin)</span>
+                  <div className="grid grid-cols-9 gap-1 bg-[#8b8b8b] p-1.5 border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white">
+                    {Array.from({ length: 27 }).map((_, i) => {
+                      const itemEntries = Object.entries(inventory).filter(([_, count]) => count > 0);
+                      const hasItem = itemEntries[i];
+                      
+                      return (
+                        <div 
+                          key={i} 
+                          className="w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex items-center justify-center hover:bg-slate-300 cursor-pointer relative"
+                        >
+                          {hasItem && (
+                            <div
+                              draggable
+                              onDragStart={(e) => {
+                                setDraggedItem(hasItem[0] as BlockType);
+                                e.dataTransfer.effectAllowed = 'move';
+                              }}
+                              className="w-full h-full flex items-center justify-center cursor-grab active:cursor-grabbing"
+                            >
+                              {/* Beautiful 3D Isometric Textured Icon */}
+                              <MinecraftBlockIcon type={hasItem[0] as BlockType} size={24} />
+                              <span className="absolute bottom-0.5 right-0.5 text-[8px] font-bold text-white bg-slate-900/60 px-0.5 rounded pointer-events-none">
+                                {hasItem[1]}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Hotbar Section in Inventory Grid 1x8 (Sync with Live Slots) */}
+                <div className="mt-1">
+                  <span className="text-[10px] font-arcade text-slate-700 mb-1 block">Hotbar (Hızlı Erişim - Drop Slotu)</span>
+                  <div className="grid grid-cols-8 gap-1 bg-[#8b8b8b] p-1.5 border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white">
+                    {hotbarSlots.map((blk, idx) => {
+                      const def = BLOCK_DEFS[blk];
+                      const isSelected = selectedBlock === blk;
+                      return (
+                        <div 
+                          key={idx} 
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            if (draggedItem) {
+                              const newSlots = [...hotbarSlots];
+                              newSlots[idx] = draggedItem;
+                              setHotbarSlots(newSlots);
+                              setSelectedBlock(draggedItem);
+                              setDraggedItem(null);
+                              sound.playTone(500, 'sine', 0.05, 0.15);
+                            }
+                          }}
+                          onClick={() => {
+                            setSelectedBlock(blk);
+                            sound.playTone(520, 'sine', 0.05, 0.12);
+                          }}
+                          className={`w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex flex-col items-center justify-center hover:bg-slate-300 cursor-pointer relative ${
+                            isSelected ? 'bg-amber-400/20 border-amber-400' : ''
+                          }`}
+                        >
+                          {/* Beautiful 3D Isometric Textured Icon */}
+                          <MinecraftBlockIcon type={blk} size={20} />
+                          <span className="absolute bottom-0.5 right-0.5 text-[7px] font-bold text-white bg-slate-900/60 px-0.5 rounded">
+                            {inventory[blk] || 0}
+                          </span>
+                          <span className="absolute top-0.5 left-0.5 text-[7px] font-bold text-slate-400">
+                            {idx + 1}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Crafting Action Shortcuts at bottom */}
+                <div className="flex gap-2 justify-between mt-2 pt-2 border-t border-slate-400">
+                  <button 
+                    onClick={() => craftBlock('stone', 'brick', 2)} 
+                    className="flex-1 py-1.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-[8px] tracking-tight rounded-none"
+                  >
+                    Taş ➡ Tuğla (2 Taş)
+                  </button>
+                  <button 
+                    onClick={() => craftBlock('wood', 'tnt', 4)} 
+                    className="flex-1 py-1.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-[8px] tracking-tight rounded-none"
+                  >
+                    Odun ➡ TNT (4 Odun)
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Online Players indicator */}
+          <div className="absolute top-14 left-3 pointer-events-none">
+            <div className="bg-slate-950/80 backdrop-blur-md px-2.5 py-1 rounded-lg border border-slate-800 text-[11px] text-slate-300 flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5 text-emerald-400" />
+              <span>{players.size + 1} Mimar Çevrimiçi</span>
+            </div>
+          </div>
+
+          {/* ESC / Pause Menu Overlay (only if inventory is closed) */}
+          {isPaused && !showCrafting && (
+            <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-[#7e22ce]/20 border-4 border-t-[#c084fc] border-l-[#c084fc] border-b-[#581c87] border-r-[#581c87] p-6 max-w-sm w-full shadow-2xl rounded-none text-center select-none flex flex-col gap-3 relative animate-fade-in">
+                <h3 className="font-arcade text-white text-base tracking-wider mb-2">OYUN DURAKLATILDI</h3>
+                
+                <button
+                  onClick={resumeGame}
+                  className="w-full py-2.5 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] active:border-t-[#581c87] active:border-l-[#581c87] active:border-b-[#d8b4fe] active:border-r-[#d8b4fe] font-arcade text-xs tracking-wider shadow-md transition-all rounded-none cursor-pointer"
+                >
+                  Oyuna Geri Dön
+                </button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => alert("Gelişimler: " + score + " Puan Kazandın!")}
+                    className="py-2 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-[10px] tracking-wide shadow-md rounded-none"
+                  >
+                    Gelişimler
+                  </button>
+                  <button
+                    onClick={() => alert(`İstatistikler:\nSkor: ${score}\nKırılan: ${blocksMined}\nYerleştirilen: ${blocksPlaced}\nElmaslar: ${diamondsFound}`)}
+                    className="py-2 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-[10px] tracking-wide shadow-md rounded-none"
+                  >
+                    İstatistikler
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setIsMenuOpen(true)}
+                    className="py-2 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-[10px] tracking-wide shadow-md rounded-none"
+                  >
+                    Seçenekler
+                  </button>
+                  <button
+                    onClick={() => alert("Geri bildiriminiz başarıyla sunucuya iletildi!")}
+                    className="py-2 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-[10px] tracking-wide shadow-md rounded-none"
+                  >
+                    Geri Bildirim
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => {
+                    if (confirm("Lobiye geri dönmek istiyor musunuz? İlerlemeniz kaydedilecektir.")) {
+                      setGameStarted(false);
+                      setIsPaused(false);
+                    }
+                  }}
+                  className="w-full py-2.5 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-xs tracking-wider shadow-md rounded-none"
+                >
+                  Sunucudan Ayrıl
+                </button>
+
+                {/* Bottom welcoming box matching the image */}
+                <div className="mt-4 p-3 bg-[#581c87]/65 border-2 border-[#a855f7] rounded-none text-center">
+                  <h4 className="font-arcade text-[10px] text-yellow-400 mb-1">MİMAR LOBİSİ</h4>
+                  <p className="text-[9px] text-[#f3e8ff] font-arcade leading-relaxed">
+                    Usta bir mimar ol, yeni dünyalar yarat ve en yüksek skora ulaş!
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Game Menu Modal */}
       <GameMenuModal

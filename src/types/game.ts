@@ -1,4 +1,4 @@
-export type GameId = 'vice_city' | 'valorant' | 'minecraft' | 'age_of_history' | 'kart_racing';
+export type GameId = 'minecraft' | 'flappybird' | 'pong';
 
 export interface GameInfo {
   id: GameId;
@@ -26,11 +26,11 @@ export interface GameInfo {
 }
 
 export interface ScoreState {
-  vice_city: number;
-  valorant: number;
   minecraft: number;
-  age_of_history?: number;
-  kart_racing?: number;
+  flappybird: number;
+  pong: number;
+  vice_city?: number;
+  valorant?: number;
   [key: string]: number | undefined;
 }
 

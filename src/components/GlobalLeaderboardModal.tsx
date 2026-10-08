@@ -25,7 +25,7 @@ interface GlobalLeaderboardModalProps {
   onClose: () => void;
   currentPlayerName?: string;
   currentScores?: {
-    vice_city: number;
+    vice_city?: number;
     valorant?: number;
     minecraft?: number;
     [key: string]: number | undefined;
