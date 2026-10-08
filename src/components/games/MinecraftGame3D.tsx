@@ -18,6 +18,7 @@ import {
   Flame,
   Maximize,
   Minimize,
+  MousePointer,
 } from 'lucide-react';
 
 interface MinecraftGameProps {
@@ -634,6 +635,15 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     isChatOpenRef.current = isChatOpen;
   }, [isChatOpen]);
 
+  const showCraftingRef = useRef<boolean>(false);
+  useEffect(() => {
+    showCraftingRef.current = showCrafting;
+  }, [showCrafting]);
+
+  // Alt-key Free Cursor Mode state & ref
+  const [isCursorFree, setIsCursorFree] = useState<boolean>(false);
+  const altCursorActiveRef = useRef<boolean>(false);
+
   // Stable references for block operations
   const addBlockRef = useRef<(x: number, y: number, z: number, type: BlockType) => void>(() => {});
   const removeBlockRef = useRef<(x: number, y: number, z: number) => void>(() => {});
@@ -806,6 +816,21 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       document.removeEventListener('webkitfullscreenchange', handleFsChange);
     };
   }, [handleResize]);
+
+  // Toggle cursor free mode with Alt key
+  const toggleCursorLock = useCallback(() => {
+    if (document.pointerLockElement === containerRef.current) {
+      altCursorActiveRef.current = true;
+      setIsCursorFree(true);
+      document.exitPointerLock?.();
+      sound.playTone(440, 'sine', 0.04, 0.1);
+    } else {
+      altCursorActiveRef.current = false;
+      setIsCursorFree(false);
+      containerRef.current?.requestPointerLock?.();
+      sound.playTone(550, 'sine', 0.04, 0.1);
+    }
+  }, []);
 
   // Player physics
   const playerPosRef = useRef({
@@ -1441,9 +1466,17 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   // Handle pointer lock changes for pause menu
   useEffect(() => {
     const handlePointerLockChange = () => {
-      if (document.pointerLockElement !== containerRef.current && gameStarted) {
-        setIsPaused(true);
-      } else if (document.pointerLockElement === containerRef.current && gameStarted) {
+      const isLocked = document.pointerLockElement === containerRef.current;
+      if (!isLocked) {
+        if (altCursorActiveRef.current) {
+          // Intentionally unlocked via Alt key: free the cursor without pausing the game!
+          setIsCursorFree(true);
+        } else if (!isChatOpenRef.current && !showCraftingRef.current && gameStarted) {
+          setIsPaused(true);
+        }
+      } else {
+        altCursorActiveRef.current = false;
+        setIsCursorFree(false);
         setIsPaused(false);
       }
     };
@@ -1454,6 +1487,8 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   }, [gameStarted]);
 
   const resumeGame = useCallback(() => {
+    altCursorActiveRef.current = false;
+    setIsCursorFree(false);
     setIsPaused(false);
     containerRef.current?.requestPointerLock?.();
   }, []);
@@ -1646,6 +1681,8 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
     const handleClick = () => {
       if (document.pointerLockElement !== container) {
+        altCursorActiveRef.current = false;
+        setIsCursorFree(false);
         container.requestPointerLock?.();
       }
     };
@@ -1720,6 +1757,11 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         e.preventDefault();
         setShowPlayerList((prev) => !prev);
       }
+      // Alt key cursor release/lock toggle [Alt]
+      if (e.key === 'Alt' || e.code === 'AltLeft' || e.code === 'AltRight' || e.key === 'AltGraph') {
+        e.preventDefault();
+        toggleCursorLock();
+      }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -1737,7 +1779,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [toggleFullscreen]);
+  }, [toggleFullscreen, toggleCursorLock]);
 
   // Main Minecraft Game Loop & Voxel Physics
   useEffect(() => {
@@ -2184,7 +2226,10 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       }`}
     >
       {/* 3D WebGL Canvas */}
-      <div ref={containerRef} className={`w-full h-full cursor-crosshair ${gameStarted ? '' : 'hidden'}`} />
+      <div
+        ref={containerRef}
+        className={`w-full h-full ${isCursorFree ? 'cursor-default' : 'cursor-crosshair'} ${gameStarted ? '' : 'hidden'}`}
+      />
 
       {/* Floating Tam Ekran / Full Mod Button */}
       <button
@@ -2231,6 +2276,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
               onClick={() => {
                 setIsMultiplayerMode(false);
                 setGameStarted(true);
+                altCursorActiveRef.current = false;
+                setIsCursorFree(false);
+                containerRef.current?.requestPointerLock?.();
                 sound.playBonus();
               }}
               className="w-full py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] active:border-t-[#2a2a2a] active:border-l-[#2a2a2a] active:border-b-[#8a8a8a] active:border-r-[#8a8a8a] font-arcade text-xs tracking-wide shadow-md transition-all rounded-none cursor-pointer"
@@ -2242,6 +2290,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
               onClick={() => {
                 setIsMultiplayerMode(true);
                 setGameStarted(true);
+                altCursorActiveRef.current = false;
+                setIsCursorFree(false);
+                containerRef.current?.requestPointerLock?.();
                 sound.playBonus();
               }}
               className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold border-2 border-t-emerald-400 border-l-emerald-400 border-b-emerald-950 border-r-emerald-950 font-arcade text-xs tracking-wide shadow-lg transition-all rounded-none cursor-pointer flex items-center justify-center gap-2"
@@ -2336,14 +2387,39 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
               <Users className="w-3.5 h-3.5 text-purple-300" />
               <span>Davet Et</span>
             </button>
+
+            <button
+              onClick={toggleCursorLock}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-arcade shadow-lg transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer ${
+                isCursorFree
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold border-amber-300 ring-2 ring-amber-400/50'
+                  : 'bg-slate-900/85 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700/80'
+              }`}
+              title="İmleç Serbest [Alt] (Basınca imleç serbest kalır, tıklayınca veya [Alt] basınca tekrar kilitlenir)"
+            >
+              <MousePointer className="w-3.5 h-3.5" />
+              <span>[Alt] {isCursorFree ? 'İmleç Açık' : 'İmleç'}</span>
+            </button>
           </div>
-          {/* Crosshair (Minecraft Classic Cross) */}
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="relative w-4 h-4 flex items-center justify-center">
-              <div className="w-3.5 h-0.5 bg-white/90 drop-shadow" />
-              <div className="h-3.5 w-0.5 bg-white/90 absolute drop-shadow" />
+
+          {/* Alt key free cursor notification banner */}
+          {isCursorFree && !isPaused && !showCrafting && !isChatOpen && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 px-3.5 py-1.5 bg-slate-950/90 border border-amber-400/80 rounded-full shadow-2xl backdrop-blur-md flex items-center gap-2 pointer-events-none select-none animate-fade-in">
+              <MousePointer className="w-3.5 h-3.5 text-amber-400 animate-bounce" />
+              <span className="text-amber-300 text-xs font-arcade">İmleç Serbest</span>
+              <span className="text-slate-400 text-[11px] font-mono">· Kilitlemek için ekrana tıkla veya [Alt] bas</span>
             </div>
-          </div>
+          )}
+
+          {/* Crosshair (Minecraft Classic Cross) - Hidden when cursor is free */}
+          {!isCursorFree && (
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div className="relative w-4 h-4 flex items-center justify-center">
+                <div className="w-3.5 h-0.5 bg-white/90 drop-shadow" />
+                <div className="h-3.5 w-0.5 bg-white/90 absolute drop-shadow" />
+              </div>
+            </div>
+          )}
 
           {/* TNT Banner */}
           {tntNotice && (
@@ -2681,7 +2757,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                 </button>
 
                 <div className="text-[9px] font-mono text-purple-200/90 bg-purple-950/60 py-1.5 px-2 border border-purple-500/30">
-                  [E] Envanter · [C / F5] Bakış Açısı · [F / F11] Tam Ekran
+                  [Alt] İmleç · [E] Envanter · [C / F5] Bakış Açısı · [F / F11] Tam Ekran
                 </div>
 
                 <button
