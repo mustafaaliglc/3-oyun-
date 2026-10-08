@@ -11,6 +11,7 @@ interface UseMultiplayerOptions {
   onBlockBroken?: (data: { x: number; y: number; z: number; playerId: string }) => void;
   onWorldSync?: (data: { blocks: Array<{ x: number; y: number; z: number; type: string }> }) => void;
   onPlayerPunched?: (data: { id: string }) => void;
+  onPlayerJoined?: (player: RemotePlayer) => void;
 }
 
 export interface RoomStats {
@@ -29,6 +30,7 @@ export function useMultiplayer({
   onBlockBroken,
   onWorldSync,
   onPlayerPunched,
+  onPlayerJoined,
 }: UseMultiplayerOptions) {
   const [connected, setConnected] = useState<boolean>(false);
   const [ping, setPing] = useState<number>(14);
@@ -37,6 +39,7 @@ export function useMultiplayer({
     return 'p_' + Math.random().toString(36).substring(2, 8);
   });
   const [players, setPlayers] = useState<Map<string, RemotePlayer>>(new Map());
+  const playersRef = useRef<Map<string, RemotePlayer>>(new Map());
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [roomStats, setRoomStats] = useState<RoomStats>({
     vice_city: 1,
@@ -51,13 +54,15 @@ export function useMultiplayer({
   const onBlockBrokenRef = useRef(onBlockBroken);
   const onWorldSyncRef = useRef(onWorldSync);
   const onPlayerPunchedRef = useRef(onPlayerPunched);
+  const onPlayerJoinedRef = useRef(onPlayerJoined);
 
   useEffect(() => {
     onBlockPlacedRef.current = onBlockPlaced;
     onBlockBrokenRef.current = onBlockBroken;
     onWorldSyncRef.current = onWorldSync;
     onPlayerPunchedRef.current = onPlayerPunched;
-  }, [onBlockPlaced, onBlockBroken, onWorldSync, onPlayerPunched]);
+    onPlayerJoinedRef.current = onPlayerJoined;
+  }, [onBlockPlaced, onBlockBroken, onWorldSync, onPlayerPunched, onPlayerJoined]);
 
   // Ambient bots simulation to ensure lively world only for single-player arcade demos
   const botsRef = useRef<RemotePlayer[]>([]);
@@ -125,75 +130,66 @@ export function useMultiplayer({
     });
 
     socket.on('init', (data: { players: RemotePlayer[]; id: string }) => {
-      setPlayers(() => {
-        const map = new Map<string, RemotePlayer>();
-        // Add ambient bots only if any
-        botsRef.current.forEach((bot) => map.set(bot.id, bot));
-        // Add real connected players from server
-        (data.players || []).forEach((p: RemotePlayer) => {
-          if (p.id !== playerId) {
-            map.set(p.id, p);
-          }
-        });
-        return map;
+      const map = new Map<string, RemotePlayer>();
+      // Add ambient bots only if any
+      botsRef.current.forEach((bot) => map.set(bot.id, bot));
+      // Add real connected players from server
+      (data.players || []).forEach((p: RemotePlayer) => {
+        if (p.id !== playerId) {
+          map.set(p.id, p);
+        }
       });
+      playersRef.current = map;
+      setPlayers(new Map(map));
     });
 
     socket.on('player_joined', (data: { player: RemotePlayer }) => {
       if (data.player && data.player.id !== playerId) {
-        setPlayers((prev) => {
-          const next = new Map(prev);
-          next.set(data.player.id, data.player);
-          return next;
-        });
+        playersRef.current.set(data.player.id, data.player);
+        setPlayers(new Map(playersRef.current));
+        onPlayerJoinedRef.current?.(data.player);
       }
     });
 
     socket.on('player_moved', (data: Partial<RemotePlayer> & { id: string }) => {
       if (data.id && data.id !== playerId) {
-        setPlayers((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(data.id);
-          if (existing) {
-            if (data.x !== undefined) existing.x = data.x;
-            if (data.y !== undefined) existing.y = data.y;
-            if (data.z !== undefined) existing.z = data.z;
-            if (data.rotation !== undefined) existing.rotation = data.rotation;
-            if (data.speed !== undefined) existing.speed = data.speed;
-            if (data.health !== undefined) existing.health = data.health;
-            if (data.score !== undefined) existing.score = data.score;
-            if (data.wantedLevel !== undefined) existing.wantedLevel = data.wantedLevel;
-            if (data.vehicle !== undefined) existing.vehicle = data.vehicle;
-            existing.lastSeen = Date.now();
-          } else {
-            // New player not in map yet
-            next.set(data.id, {
-              id: data.id,
-              name: data.name || 'Oyuncu',
-              color: data.color || '#ec4899',
-              vehicle: data.vehicle || 'none',
-              x: data.x || 0,
-              y: data.y || 0,
-              z: data.z || 0,
-              rotation: data.rotation || 0,
-              speed: data.speed || 0,
-              health: data.health || 100,
-              score: data.score || 0,
-              wantedLevel: data.wantedLevel || 0,
-              lastSeen: Date.now(),
-            });
-          }
-          return next;
-        });
+        const existing = playersRef.current.get(data.id);
+        if (existing) {
+          if (data.x !== undefined) existing.x = data.x;
+          if (data.y !== undefined) existing.y = data.y;
+          if (data.z !== undefined) existing.z = data.z;
+          if (data.rotation !== undefined) existing.rotation = data.rotation;
+          if (data.speed !== undefined) existing.speed = data.speed;
+          if (data.health !== undefined) existing.health = data.health;
+          if (data.score !== undefined) existing.score = data.score;
+          if (data.wantedLevel !== undefined) existing.wantedLevel = data.wantedLevel;
+          if (data.vehicle !== undefined) existing.vehicle = data.vehicle;
+          existing.lastSeen = Date.now();
+        } else {
+          // New player not in map yet
+          playersRef.current.set(data.id, {
+            id: data.id,
+            name: data.name || 'Oyuncu',
+            color: data.color || '#ec4899',
+            vehicle: data.vehicle || 'none',
+            x: data.x || 0,
+            y: data.y || 0,
+            z: data.z || 0,
+            rotation: data.rotation || 0,
+            speed: data.speed || 0,
+            health: data.health || 100,
+            score: data.score || 0,
+            wantedLevel: data.wantedLevel || 0,
+            lastSeen: Date.now(),
+          });
+          setPlayers(new Map(playersRef.current));
+        }
       }
     });
 
     socket.on('player_left', (data: { id: string }) => {
-      setPlayers((prev) => {
-        const next = new Map(prev);
-        next.delete(data.id);
-        return next;
-      });
+      playersRef.current.delete(data.id);
+      setPlayers(new Map(playersRef.current));
     });
 
     // Minecraft specific socket events
@@ -266,10 +262,15 @@ export function useMultiplayer({
   }, []);
 
   // Send player updates to Socket.io server
+  const lastUpdateSendRef = useRef<number>(0);
   const sendUpdate = useCallback(
     (data: Partial<RemotePlayer> & { action?: string }) => {
-      if (socketRef.current && socketRef.current.connected) {
-        socketRef.current.emit('player_update', data);
+      const now = performance.now();
+      if (data.action || now - lastUpdateSendRef.current > 45) {
+        lastUpdateSendRef.current = now;
+        if (socketRef.current && socketRef.current.connected) {
+          socketRef.current.emit('player_update', data);
+        }
       }
     },
     []
@@ -341,6 +342,7 @@ export function useMultiplayer({
     transport,
     playerId,
     players,
+    playersRef,
     chatMessages,
     roomStats,
     sendUpdate,

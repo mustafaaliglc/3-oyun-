@@ -622,7 +622,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return () => clearInterval(interval);
   }, [gameStarted, isPaused]);
 
-  // Modals & Multiplayer UI states
+  // Modals & Multiplayer UI state
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const [isInviteOpen, setIsInviteOpen] = useState<boolean>(false);
   const [isMultiplayerMode, setIsMultiplayerMode] = useState<boolean>(true);
@@ -664,12 +664,13 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   }
   const remoteStevesRef = useRef<Map<string, RemoteSteveInstance>>(new Map());
 
-  // Multiplayer Hook
+  // Multiplayer Hook with direct playersRef for zero-lag Three.js rendering
   const {
     connected,
     ping,
     playerId,
     players,
+    playersRef,
     sendUpdate,
     sendChat,
     sendBlockPlace,
@@ -704,6 +705,19 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     onPlayerPunched: (data) => {
       const inst = remoteStevesRef.current.get(data.id);
       if (inst) inst.punchTime = performance.now();
+    },
+    onPlayerJoined: () => {
+      const pos = playerPosRef.current;
+      sendUpdate({
+        x: pos.x,
+        y: pos.y,
+        z: pos.z,
+        rotation: pos.yaw,
+        speed: 0,
+        score,
+        vehicle: selectedBlock || undefined,
+        action: 'handshake',
+      });
     },
   });
 
@@ -1398,9 +1412,20 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       playerPosRef.current.z = 0;
       playerPosRef.current.vy = 0;
 
+      sendUpdate({
+        x: 0,
+        y: spawnY,
+        z: 0,
+        rotation: 0,
+        speed: 0,
+        score,
+        vehicle: selectedBlock || undefined,
+        action: 'spawn',
+      });
+
       handleResize(); // Ensure renderer is resized when it becomes visible
     }
-  }, [gameStarted, generateWorld, spawnCows, handleResize]);
+  }, [gameStarted, generateWorld, spawnCows, handleResize, sendUpdate, score, selectedBlock]);
 
   // Update Held Block items in Player's Hand (First Person and Third Person)
   const updateHeldItems = useCallback(() => {
@@ -1928,7 +1953,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       if (sceneInstance) {
         const activeRemoteIds = new Set<string>();
 
-        players.forEach((rp, id) => {
+        playersRef.current.forEach((rp, id) => {
           if (id === playerId) return;
           activeRemoteIds.add(id);
 
