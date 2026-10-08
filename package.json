@@ -3,15 +3,11 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "scripts": { 
-    "start": "node server.js",
-    "dev": "tsx server.ts",
-  },
-    }
+  "scripts": {
+    "start": "tsx server.ts",
     "dev": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "tsx server.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
   },
