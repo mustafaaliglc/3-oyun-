@@ -3,8 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "scripts": { "start": "node server.js",
-    "dev": "tsx server.ts"
+  "scripts": { 
+    "start": "node server.js",
+    "dev": "tsx server.ts",
   },
     }
     "dev": "tsx server.ts",
