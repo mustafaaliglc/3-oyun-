@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "LeaderboardEntry": {
+      "title": "Leaderboard Entry",
+      "description": "High score and ranking record for a game played on the platform",
+      "type": "object",
+      "properties": {
+        "playerName": {
+          "type": "string",
+          "description": "Display name of the player",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "gameId": {
+          "type": "string",
+          "description": "Identifier of the game",
+          "enum": ["vice_city", "valorant", "minecraft", "age_of_history", "kart_racing"]
+        },
+        "gameTitle": {
+          "type": "string",
+          "description": "Human readable game title",
+          "maxLength": 50
+        },
+        "score": {
+          "type": "number",
+          "description": "Achieved score in points"
+        },
+        "badge": {
+          "type": "string",
+          "description": "Achievement title or rank",
+          "maxLength": 50
+        },
+        "nationOrVehicle": {
+          "type": "string",
+          "description": "Chosen nation or car in game",
+          "maxLength": 50
+        },
+        "avatarColor": {
+          "type": "string",
+          "description": "Hex code for player badge or avatar",
+          "maxLength": 20
+        },
+        "country": {
+          "type": "string",
+          "description": "Country code or emoji",
+          "maxLength": 10
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Unix millisecond timestamp"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when the score was posted"
+        }
+      },
+      "required": ["playerName", "gameId", "score"]
+    }
+  },
+  "firestore": {
+    "/leaderboard/{entryId}": {
+      "schema": "LeaderboardEntry",
+      "description": "Public leaderboard high score records"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Retro Oyun Merkezi",
+  "description": "Vice City 3D Açık Dünya, Valorant Taktiksel FPS ve Minecraft Voxel 3D içeren çok oyunculu interaktif web oyun platformu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
