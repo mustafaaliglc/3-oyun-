@@ -1,0 +1,15 @@
+[11:27:40] [Client thread/INFO]: Environment: ElyEnvironment[name=ely,authHost=https://authserver.ely.by/auth,accountsHost=https://account.ely.by/api/mojang,sessionHost=https://account.ely.by/api/minecraft/session,servicesHost=<null>]
+[11:27:40] [Client thread/INFO]: Setting user: msa0853
+[11:27:40] [Client thread/INFO]: (Session ID is token:eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJpYXQiOjE3ODY3NDM1MzcsInN1YiI6ImVseXw0MzAxMjQzIiwiY2xpZW50X2lkIjoidGxhdW5jaGVyIiwic2NvcGUiOiJvYnRhaW5fb3duX2FjY291bnRfaW5mbyBtaW5lY3JhZnRfc2VydmVyX3Nlc3Npb24ifQ.AOz4IT1uy7fbHYrBTPsawNFnS2DRmX2-g-5FlQuV0R4W67qc38YQaw0T5p14phy15jXn_9sv8x1GzWn6L93Jcg:650934c5889c4b4e8f7035df251af83c)
+[11:27:40] [Client thread/INFO]: Environment: ElyEnvironment[name=ely,authHost=https://authserver.ely.by/auth,accountsHost=https://account.ely.by/api/mojang,sessionHost=https://account.ely.by/api/minecraft/session,servicesHost=<null>]
+[11:27:40] [Client thread/INFO]: LWJGL Version: 2.9.1
+[11:27:40] [Client thread/INFO]: Reloading ResourceManager: Default
+[11:27:41] [Sound Library Loader/INFO]: Starting up SoundSystem...
+[11:27:41] [Thread-5/INFO]: Initializing LWJGL OpenAL
+[11:27:41] [Thread-5/INFO]: (The LWJGL binding of OpenAL.  For more information, see http://www.lwjgl.org)
+[11:27:41] [Thread-5/INFO]: OpenAL initialized.
+[11:27:41] [Client thread/INFO]: Created: 512x512 textures-atlas
+[11:27:41] [Sound Library Loader/INFO]: Sound engine started
+[11:27:42] [Client thread/INFO]: Stopping!
+[11:27:42] [Client thread/INFO]: SoundSystem shutting down...
+[11:27:42] [Client thread/WARN]: Author: Paul Lamb, www.paulscode.com
