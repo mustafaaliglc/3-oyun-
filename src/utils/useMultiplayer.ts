@@ -74,7 +74,7 @@ export function useMultiplayer({
     }
 
     const botColors = ['#f43f5e', '#06b6d4', '#eab308', '#a855f7'];
-    const botNames = ['Tommy_V', 'Lance_Vance', 'Ken_Rosenberg', 'Sonny_F'];
+    const botNames = ['Lance_Vance', 'Ken_Rosenberg', 'Sonny_F'];
     const botVehicles = ['cheetah', 'infernus', 'banshee', 'cruiser'];
 
     const initialBots: RemotePlayer[] = botNames.map((name, i) => ({

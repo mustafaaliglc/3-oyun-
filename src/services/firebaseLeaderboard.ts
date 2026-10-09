@@ -37,9 +37,12 @@ export function subscribeToLeaderboard(
       const results: LeaderboardEntry[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
+        const playerName = data.playerName || 'Oyuncu';
+        const pLower = playerName.toLowerCase();
+        if (pLower.includes('tommy') || pLower.includes('jett')) return;
         results.push({
           id: docSnap.id,
-          playerName: data.playerName || 'Oyuncu',
+          playerName,
           gameId: data.gameId,
           gameTitle: data.gameTitle || 'Oyun',
           score: Number(data.score) || 0,
@@ -78,6 +81,10 @@ export async function submitScoreToFirestore(entry: {
   country?: string;
 }): Promise<void> {
   const sanitizedName = entry.playerName.trim().slice(0, 30) || 'Oyuncu';
+  const sLower = sanitizedName.toLowerCase();
+  if (sLower.includes('tommy') || sLower.includes('jett')) {
+    return;
+  }
   // Standard alphanumeric ID for Firestore document
   const safeDocId = `score_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 

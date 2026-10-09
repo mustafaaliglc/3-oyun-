@@ -54,7 +54,12 @@ class LeaderboardDatabase {
   }
 
   public getTop10(gameFilter?: string): LeaderboardEntry[] {
-    let filtered = this.entries;
+    let filtered = this.entries.filter(
+      (e) => {
+        const name = e.playerName.toLowerCase();
+        return !name.includes('tommy') && !name.includes('jett');
+      }
+    );
     if (gameFilter && gameFilter !== 'all') {
       filtered = filtered.filter((e) => e.gameId === gameFilter);
     }
@@ -64,6 +69,10 @@ class LeaderboardDatabase {
   }
 
   public addScore(entry: Omit<LeaderboardEntry, 'id' | 'timestamp'>): LeaderboardEntry {
+    const pName = entry.playerName.toLowerCase();
+    if (pName.includes('tommy') || pName.includes('jett')) {
+      throw new Error('Player not allowed');
+    }
     // If player already exists for this game, update their score if higher
     const existingIndex = this.entries.findIndex(
       (e) => e.playerName.toLowerCase() === entry.playerName.toLowerCase() && e.gameId === entry.gameId

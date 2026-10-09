@@ -40,7 +40,7 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
   currentScores,
   activeGameId = 'vice_city',
 }) => {
-  const [filter, setFilter] = useState<'all' | 'vice_city' | 'valorant' | 'minecraft'>('all');
+  const [filter, setFilter] = useState<'all' | 'flappybird' | 'pong'>('all');
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -57,8 +57,8 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
     }
   });
 
-  const [targetGameId, setTargetGameId] = useState<'vice_city' | 'valorant' | 'minecraft'>(
-    (activeGameId as 'vice_city' | 'valorant' | 'minecraft') || 'vice_city'
+  const [targetGameId, setTargetGameId] = useState<'flappybird' | 'pong'>(
+    (activeGameId as 'flappybird' | 'pong') || 'flappybird'
   );
 
   const activeScore = currentScores ? currentScores[targetGameId] || 0 : 0;
@@ -113,7 +113,7 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
 
     const scoreNum = parseInt(customScoreInput, 10);
     if (isNaN(scoreNum) || scoreNum <= 0) {
-      setErrorMessage('Lütfen 0\'dan büyük bir skor puanı girin (veya oyunda puan kazanın).');
+      setErrorMessage('Lütfen 0\'dan büyük bir skor puanı girin.');
       return;
     }
 
@@ -126,21 +126,18 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
       }
 
       const gameTitles: Record<string, string> = {
-        vice_city: 'Vice City 3D',
-        valorant: 'Valorant 3D',
-        minecraft: 'Minecraft 3D',
+        flappybird: 'Flappy Bird',
+        pong: 'Retro Pong',
       };
 
       const badges: Record<string, string> = {
-        vice_city: 'Şehir Canavarı',
-        valorant: 'Radyant Ajan',
-        minecraft: 'Usta Mimar',
+        flappybird: 'Uçan Üstat',
+        pong: 'Pong Şampiyonu',
       };
 
       const avatarColors: Record<string, string> = {
-        vice_city: '#ec4899',
-        valorant: '#f43f5e',
-        minecraft: '#10b981',
+        flappybird: '#f59e0b',
+        pong: '#3b82f6',
       };
 
       const entryPayload = {
@@ -149,7 +146,7 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
         gameTitle: gameTitles[targetGameId] || 'Oyun',
         score: scoreNum,
         badge: badges[targetGameId] || 'Canlı Rekortmen',
-        avatarColor: avatarColors[targetGameId] || '#ec4899',
+        avatarColor: avatarColors[targetGameId] || '#f59e0b',
         country: 'TR',
       };
 
@@ -187,8 +184,8 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-md animate-fade-in select-none">
-      <div className="w-full max-w-2xl bg-slate-900 border border-amber-500/30 rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-5 bg-slate-950/90 backdrop-blur-md animate-fade-in select-none">
+      <div className="w-full max-w-2xl bg-slate-900 border border-amber-500/40 rounded-2xl p-4 sm:p-6 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
         {/* Modal Header */}
         <div className="flex items-start justify-between pb-3 sm:pb-4 border-b border-slate-800">
           <div className="flex items-center gap-3">
@@ -199,7 +196,7 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 flex items-center gap-1.5 shadow-sm">
                   <Database className="w-3 h-3 text-amber-400 animate-pulse" />
-                  Top 10 Gerçek Oyuncu Listesi
+                  Top 10 Flappy Bird & Pong Sıralaması
                 </span>
                 <span className="text-[11px] text-slate-400 font-mono">CANLI SIRALAMA</span>
               </div>
@@ -231,9 +228,8 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
         <div className="flex items-center gap-1 bg-slate-950 p-1.5 rounded-xl border border-slate-800 my-3 overflow-x-auto">
           {[
             { id: 'all', label: 'Tüm Oyunlar', icon: Globe },
-            { id: 'vice_city', label: 'Vice City 3D', icon: Car },
-            { id: 'valorant', label: 'Valorant 3D', icon: Crosshair },
-            { id: 'minecraft', label: 'Minecraft 3D', icon: Box },
+            { id: 'flappybird', label: 'Flappy Bird', icon: Trophy },
+            { id: 'pong', label: 'Pong', icon: Trophy },
           ].map((tab) => {
             const Icon = tab.icon;
             const active = filter === tab.id;
@@ -266,7 +262,7 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
               <Trophy className="w-8 h-8 text-amber-500/50 mb-1" />
               <p className="font-bold text-white text-sm">Henüz Bu Listeye Skor Eklenmedi</p>
               <p className="text-slate-400 max-w-sm text-center">
-                Rastgele sahte sayılar kaldırıldı! Aşağıdaki formdan adınızı ve skorunuzu yazarak Top 10 listesine ilk sıradan adınızı ekleyin.
+                Aşağıdaki formdan adınızı ve skorunuzu yazarak Flappy Bird veya Pong Top 10 listesine ilk sıradan adınızı ekleyin.
               </p>
             </div>
           ) : (
@@ -312,7 +308,6 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
                     </div>
                     <div className="text-[11px] text-slate-400 truncate">
                       {item.gameTitle}
-                      {item.nationOrVehicle ? ` · ${item.nationOrVehicle}` : ''}
                     </div>
                   </div>
                 </div>
@@ -329,7 +324,7 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
           )}
         </div>
 
-        {/* Custom Submission Box ("Ekleyen eklesin oraya") */}
+        {/* Custom Submission Box */}
         <form onSubmit={handleSubmitScore} className="pt-3 mt-3 border-t border-slate-800 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
@@ -365,9 +360,8 @@ export const GlobalLeaderboardModal: React.FC<GlobalLeaderboardModalProps> = ({
                 onChange={(e) => setTargetGameId(e.target.value as typeof targetGameId)}
                 className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
               >
-                <option value="vice_city">Vice City 3D</option>
-                <option value="valorant">Valorant 3D</option>
-                <option value="minecraft">Minecraft 3D</option>
+                <option value="flappybird">Flappy Bird</option>
+                <option value="pong">Pong</option>
               </select>
             </div>
 
