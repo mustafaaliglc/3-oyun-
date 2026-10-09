@@ -287,7 +287,7 @@ io.on('connection', (socket: Socket) => {
     io.to(joinedRoom).emit('chat_message', message);
   });
 
-  // 7. In-Game Actions
+  // 4. In-Game Actions (Horn, Turbo, Attack, Territory Conquer)
   socket.on('game_action', (data: { actionType: string; payload: unknown }) => {
     if (!joinedRoom || !rooms[joinedRoom]) return;
     socket.to(joinedRoom).emit('game_action', {
@@ -298,7 +298,7 @@ io.on('connection', (socket: Socket) => {
     });
   });
 
-  // 8. Ping / Pong Latency Check
+  // 5. Ping / Pong Latency Check
   socket.on('ping_check', (clientTimestamp: number, callback: (ack: { clientTimestamp: number; serverTimestamp: number }) => void) => {
     if (typeof callback === 'function') {
       callback({
@@ -308,7 +308,7 @@ io.on('connection', (socket: Socket) => {
     }
   });
 
-  // 9. Disconnect
+  // 6. Disconnect
   socket.on('disconnect', () => {
     if (joinedRoom && rooms[joinedRoom] && assignedPlayerId) {
       rooms[joinedRoom].players.delete(assignedPlayerId);
@@ -331,4 +331,144 @@ wss.on('connection', (ws: WebSocket) => {
 
       if (data.type === 'join') {
         currentRoom = data.room || 'vice_city';
-        playerId
+        playerId = data.id || `ws_${Math.random().toString(36).substring(2, 9)}`;
+
+        if (!rooms[currentRoom]) {
+          rooms[currentRoom] = { players: new Map(), wsClients: new Map() };
+        }
+
+        const room = rooms[currentRoom];
+        room.wsClients.set(playerId, ws);
+
+        const newPlayer: PlayerState = {
+          id: playerId,
+          name: data.name || 'Oyuncu',
+          color: data.color || '#ec4899',
+          vehicle: data.vehicle || 'infernus',
+          x: data.x || 0,
+          y: data.y || 0,
+          z: data.z || 0,
+          rotation: data.rotation || 0,
+          speed: 0,
+          health: 100,
+          score: 0,
+          wantedLevel: 0,
+          lastSeen: Date.now(),
+        };
+
+        room.players.set(playerId, newPlayer);
+
+        ws.send(
+          JSON.stringify({
+            type: 'init',
+            id: playerId,
+            players: Array.from(room.players.values()),
+          })
+        );
+
+        const joinMsg = JSON.stringify({ type: 'player_joined', player: newPlayer });
+        room.wsClients.forEach((client, id) => {
+          if (id !== playerId && client.readyState === WebSocket.OPEN) {
+            client.send(joinMsg);
+          }
+        });
+      } else if (data.type === 'update') {
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+        const player = room.players.get(playerId);
+
+        if (player) {
+          player.x = data.x ?? player.x;
+          player.y = data.y ?? player.y;
+          player.z = data.z ?? player.z;
+          player.rotation = data.rotation ?? player.rotation;
+          player.speed = data.speed ?? player.speed;
+          player.health = data.health ?? player.health;
+          player.score = data.score ?? player.score;
+          player.wantedLevel = data.wantedLevel ?? player.wantedLevel;
+          player.lastSeen = Date.now();
+
+          const updateMsg = JSON.stringify({
+            type: 'player_moved',
+            id: playerId,
+            x: player.x,
+            y: player.y,
+            z: player.z,
+            rotation: player.rotation,
+            speed: player.speed,
+            health: player.health,
+            score: player.score,
+            wantedLevel: player.wantedLevel,
+            action: data.action,
+          });
+
+          room.wsClients.forEach((client, id) => {
+            if (id !== playerId && client.readyState === WebSocket.OPEN) {
+              client.send(updateMsg);
+            }
+          });
+        }
+      } else if (data.type === 'chat') {
+        if (!currentRoom || !rooms[currentRoom]) return;
+        const room = rooms[currentRoom];
+        const player = room.players.get(playerId);
+        const chatMsg = JSON.stringify({
+          type: 'chat',
+          id: playerId,
+          name: player?.name || 'Oyuncu',
+          color: player?.color || '#ec4899',
+          text: data.text,
+          timestamp: Date.now(),
+        });
+        room.wsClients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(chatMsg);
+          }
+        });
+      }
+    } catch {
+      // ignore
+    }
+  });
+
+  ws.on('close', () => {
+    if (currentRoom && rooms[currentRoom] && playerId) {
+      const room = rooms[currentRoom];
+      room.players.delete(playerId);
+      room.wsClients.delete(playerId);
+
+      const leaveMsg = JSON.stringify({ type: 'player_left', id: playerId });
+      room.wsClients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(leaveMsg);
+        }
+      });
+    }
+  });
+});
+
+// Mount Vite or serve static files
+async function startServer() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const PORT = process.env.PORT || 3000;
+
+  if (!isProduction) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(path.resolve('dist')));
+    app.get('*', (req, res) => {
+      res.sendFile(path.resolve('dist', 'index.html'));
+    });
+  }
+
+  server.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT} with Socket.io & WebSocket support`);
+  });
+}
+
+startServer();
