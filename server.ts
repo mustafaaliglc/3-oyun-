@@ -14,6 +14,10 @@ export interface PlayerState {
   y: number;
   z: number;
   rotation: number;
+  yaw?: number;
+  pitch?: number;
+  isJumping?: boolean;
+  selectedBlock?: string | null;
   speed: number;
   health: number;
   score: number;
@@ -51,8 +55,20 @@ const rooms: Record<string, RoomData> = {
   kart_racing: { players: new Map(), wsClients: new Map() },
 };
 
-// In-Memory Shared Minecraft Voxel World State
-const minecraftWorldBlocks = new Map<string, string>();
+// Dynamic In-Memory Shared Voxel World State Per Room
+const roomWorldBlocks = new Map<string, Map<string, string>>();
+
+function getRoomBlockMap(room: string) {
+  let m = roomWorldBlocks.get(room);
+  if (!m) {
+    m = new Map<string, string>();
+    roomWorldBlocks.set(room, m);
+  }
+  return m;
+}
+
+// In-Memory Shared Minecraft Voxel World State (default room)
+const minecraftWorldBlocks = getRoomBlockMap('minecraft');
 
 app.use(express.json());
 
@@ -179,14 +195,13 @@ io.on('connection', (socket: Socket) => {
       engine: 'Socket.io Server',
     });
 
-    // If joining Minecraft room, also send the current synchronized world blocks
-    if (roomName === 'minecraft') {
-      const blockEntries = Array.from(minecraftWorldBlocks.entries()).map(([k, type]) => {
-        const [x, y, z] = k.split(',').map(Number);
-        return { x, y, z, type };
-      });
-      socket.emit('mc_world_sync', { blocks: blockEntries });
-    }
+    // If joining a Minecraft / room-based world, send the current synchronized world blocks for that room
+    const roomBlocks = getRoomBlockMap(roomName);
+    const blockEntries = Array.from(roomBlocks.entries()).map(([k, type]) => {
+      const [x, y, z] = k.split(',').map(Number);
+      return { x, y, z, type };
+    });
+    socket.emit('mc_world_sync', { blocks: blockEntries, room: roomName });
 
     // Broadcast to others in the room
     socket.to(roomName).emit('player_joined', { player });
@@ -206,6 +221,10 @@ io.on('connection', (socket: Socket) => {
       if (data.y !== undefined) player.y = data.y;
       if (data.z !== undefined) player.z = data.z;
       if (data.rotation !== undefined) player.rotation = data.rotation;
+      if (data.yaw !== undefined) player.yaw = data.yaw;
+      if (data.pitch !== undefined) player.pitch = data.pitch;
+      if (data.isJumping !== undefined) player.isJumping = data.isJumping;
+      if (data.selectedBlock !== undefined) player.selectedBlock = data.selectedBlock;
       if (data.speed !== undefined) player.speed = data.speed;
       if (data.health !== undefined) player.health = data.health;
       if (data.score !== undefined) player.score = data.score;
@@ -219,6 +238,10 @@ io.on('connection', (socket: Socket) => {
         y: player.y,
         z: player.z,
         rotation: player.rotation,
+        yaw: player.yaw,
+        pitch: player.pitch,
+        isJumping: player.isJumping,
+        selectedBlock: player.selectedBlock,
         speed: player.speed,
         health: player.health,
         score: player.score,
@@ -232,14 +255,14 @@ io.on('connection', (socket: Socket) => {
 
   // 3. Minecraft Real-time Block Placement
   socket.on('mc_block_place', (data: { x: number; y: number; z: number; type: string }) => {
-    if (joinedRoom !== 'minecraft') return;
+    if (!joinedRoom) return;
     const rx = Math.round(data.x);
     const ry = Math.round(data.y);
     const rz = Math.round(data.z);
     const key = `${rx},${ry},${rz}`;
-    minecraftWorldBlocks.set(key, data.type);
+    getRoomBlockMap(joinedRoom).set(key, data.type);
 
-    socket.to('minecraft').emit('mc_block_placed', {
+    socket.to(joinedRoom).emit('mc_block_placed', {
       x: rx,
       y: ry,
       z: rz,
@@ -250,14 +273,14 @@ io.on('connection', (socket: Socket) => {
 
   // 4. Minecraft Real-time Block Destruction / Mining
   socket.on('mc_block_break', (data: { x: number; y: number; z: number }) => {
-    if (joinedRoom !== 'minecraft') return;
+    if (!joinedRoom) return;
     const rx = Math.round(data.x);
     const ry = Math.round(data.y);
     const rz = Math.round(data.z);
     const key = `${rx},${ry},${rz}`;
-    minecraftWorldBlocks.set(key, 'air');
+    getRoomBlockMap(joinedRoom).set(key, 'air');
 
-    socket.to('minecraft').emit('mc_block_broken', {
+    socket.to(joinedRoom).emit('mc_block_broken', {
       x: rx,
       y: ry,
       z: rz,
@@ -267,8 +290,8 @@ io.on('connection', (socket: Socket) => {
 
   // 5. Minecraft Real-time Player Punch / Arm Swing
   socket.on('mc_player_punch', () => {
-    if (joinedRoom !== 'minecraft') return;
-    socket.to('minecraft').emit('mc_player_punched', {
+    if (!joinedRoom) return;
+    socket.to(joinedRoom).emit('mc_player_punched', {
       id: assignedPlayerId,
     });
   });

@@ -16,7 +16,23 @@ import {
   Maximize,
   Minimize,
   MousePointer,
+  Users,
+  Copy,
+  Check,
+  Radio,
+  MessageSquare,
+  Send,
+  Globe,
+  Share2,
+  Play,
+  Plus,
 } from 'lucide-react';
+import {
+  multiplayerManager,
+  MinecraftMultiplayerManager,
+  NetworkPlayer,
+  BlockEvent,
+} from '../../services/minecraftMultiplayer';
 
 interface MinecraftGameProps {
   game: GameInfo;
@@ -521,14 +537,70 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     steeringSensitivity: 2,
   });
 
-  // Singleplayer stubs for online methods
-  const sendUpdate = useCallback((_d: any) => {}, []);
-  const sendPlayerPunch = useCallback(() => {}, []);
-  const sendBlockBreak = useCallback((_x: number, _y: number, _z: number) => {}, []);
-  const sendBlockPlace = useCallback((_x: number, _y: number, _z: number, _t: string) => {}, []);
+  // Multiplayer room & connection state
+  const [roomMode, setRoomMode] = useState<'menu' | 'host' | 'join'>('menu');
+  const [roomId, setRoomId] = useState<string>('');
+  const [generatedRoomCode, setGeneratedRoomCode] = useState<string>('');
+  const [joinCodeInput, setJoinCodeInput] = useState<string>('');
+  const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [connectedPlayers, setConnectedPlayers] = useState<NetworkPlayer[]>([]);
+  const [isMultiplayerActive, setIsMultiplayerActive] = useState<boolean>(false);
+
+  // In-Game Chat
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; name: string; color: string; text: string; timestamp: number }>>([]);
+  const [chatInput, setChatInput] = useState<string>('');
   const isChatOpenRef = useRef<boolean>(false);
   const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
   const [showPlayerList, setShowPlayerList] = useState<boolean>(false);
+
+  useEffect(() => {
+    isChatOpenRef.current = isChatOpen;
+  }, [isChatOpen]);
+
+  interface RemotePlayerObject {
+    id: string;
+    name: string;
+    color: string;
+    group: THREE.Group;
+    head: THREE.Mesh;
+    armL: THREE.Mesh;
+    armR: THREE.Mesh;
+    legL: THREE.Mesh;
+    legR: THREE.Mesh;
+    handSlot: THREE.Group;
+    currentHeldBlock: string | null;
+    targetX: number;
+    targetY: number;
+    targetZ: number;
+    targetYaw: number;
+    targetPitch: number;
+    walkTime: number;
+    punchTime: number;
+  }
+
+  const remotePlayersRef = useRef<Map<string, RemotePlayerObject>>(new Map());
+  const lastNetworkSendRef = useRef<number>(0);
+  const isJumpingRef = useRef<boolean>(false);
+  const selectedBlockRef = useRef<BlockType | null>(selectedBlock);
+
+  useEffect(() => {
+    selectedBlockRef.current = selectedBlock;
+  }, [selectedBlock]);
+
+  // Online network actions
+  const sendPlayerPunch = useCallback(() => {
+    multiplayerManager.sendPunch();
+  }, []);
+
+  const sendBlockBreak = useCallback((x: number, y: number, z: number) => {
+    multiplayerManager.breakBlock(x, y, z);
+  }, []);
+
+  const sendBlockPlace = useCallback((x: number, y: number, z: number, t: string) => {
+    multiplayerManager.placeBlock(x, y, z, t);
+  }, []);
 
   // Handle pointer lock release and pause when inventory is opened
   useEffect(() => {
@@ -921,7 +993,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     if (!record) return;
 
     scene.remove(record.mesh);
-    record.mesh.geometry.dispose();
+    // Note: Do NOT dispose record.mesh.geometry here as it is the sharedBoxGeoRef geometry used by all world blocks!
     worldBlocksRef.current.delete(key);
     return record.type;
   }, []);
@@ -931,6 +1003,291 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     addBlockRef.current = addBlock;
     removeBlockRef.current = removeBlock;
   }, [addBlock, removeBlock]);
+
+  // 3D Character Mesh Generator for remote players in the world
+  const createNetworkPlayerMesh = useCallback((name: string, colorHex: string, isHost: boolean) => {
+    const group = new THREE.Group();
+
+    // 1. Head
+    const headMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), headMat);
+    head.position.y = 2.4;
+    group.add(head);
+
+    // Hair
+    const hairMat = new THREE.MeshStandardMaterial({ color: '#451a03' });
+    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.25, 0.85), hairMat);
+    hair.position.set(0, 2.72, 0);
+    group.add(hair);
+
+    // 2. Torso
+    const torsoMat = new THREE.MeshStandardMaterial({ color: colorHex || '#10b981', roughness: 0.7 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.5), torsoMat);
+    torso.position.y = 1.4;
+    group.add(torso);
+
+    // 3. Left Arm
+    const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
+    const armLGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+    armLGeo.translate(0, -0.4, 0);
+    const armL = new THREE.Mesh(armLGeo, armMat);
+    armL.position.set(-0.65, 1.8, 0);
+    group.add(armL);
+
+    // 4. Right Arm
+    const armRGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+    armRGeo.translate(0, -0.4, 0);
+    const armR = new THREE.Mesh(armRGeo, armMat);
+    armR.position.set(0.65, 1.8, 0);
+    group.add(armR);
+
+    // Hand slot for held block
+    const handSlot = new THREE.Group();
+    handSlot.position.set(0, -0.65, -0.15);
+    armR.add(handSlot);
+
+    // 5. Legs
+    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
+    const legGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
+    legGeo.translate(0, -0.5, 0);
+
+    const legL = new THREE.Mesh(legGeo, pantsMat);
+    legL.position.set(-0.25, 0.8, 0);
+    group.add(legL);
+
+    const legR = new THREE.Mesh(legGeo, pantsMat);
+    legR.position.set(0.25, 0.8, 0);
+    group.add(legR);
+
+    // 6. 3D Billboard Name Tag
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
+      ctx.beginPath();
+      ctx.roundRect(8, 8, 240, 48, 8);
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = isHost ? '#fbbf24' : '#38bdf8';
+      ctx.stroke();
+
+      ctx.fillStyle = isHost ? '#fef08a' : '#ffffff';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText((isHost ? '👑 ' : '') + name.slice(0, 15), 128, 32);
+    }
+    const nameTex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: nameTex, depthTest: false });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(2.4, 0.6, 1);
+    sprite.position.y = 3.3;
+    group.add(sprite);
+
+    return {
+      group,
+      head,
+      armL,
+      armR,
+      legL,
+      legR,
+      handSlot,
+    };
+  }, []);
+
+  // Add or update remote player in scene
+  const upsertRemotePlayer = useCallback((netPlayer: NetworkPlayer) => {
+    const scene = sceneRef.current;
+    if (!scene || netPlayer.id === multiplayerManager.myPlayerId) return;
+
+    let rp = remotePlayersRef.current.get(netPlayer.id);
+    if (!rp) {
+      const isHostPlayer = !multiplayerManager.isHost;
+      const meshData = createNetworkPlayerMesh(netPlayer.name, netPlayer.color, isHostPlayer);
+      meshData.group.position.set(netPlayer.x, netPlayer.y, netPlayer.z);
+      scene.add(meshData.group);
+
+      rp = {
+        id: netPlayer.id,
+        name: netPlayer.name,
+        color: netPlayer.color,
+        group: meshData.group,
+        head: meshData.head,
+        armL: meshData.armL,
+        armR: meshData.armR,
+        legL: meshData.legL,
+        legR: meshData.legR,
+        handSlot: meshData.handSlot,
+        currentHeldBlock: null,
+        targetX: netPlayer.x,
+        targetY: netPlayer.y,
+        targetZ: netPlayer.z,
+        targetYaw: netPlayer.yaw || 0,
+        targetPitch: netPlayer.pitch || 0,
+        walkTime: 0,
+        punchTime: 0,
+      };
+      remotePlayersRef.current.set(netPlayer.id, rp);
+    } else {
+      rp.targetX = netPlayer.x;
+      rp.targetY = netPlayer.y;
+      rp.targetZ = netPlayer.z;
+      if (netPlayer.yaw !== undefined) rp.targetYaw = netPlayer.yaw;
+      if (netPlayer.pitch !== undefined) rp.targetPitch = netPlayer.pitch;
+    }
+
+    // Update held item if changed
+    if (rp && rp.currentHeldBlock !== netPlayer.selectedBlock) {
+      rp.currentHeldBlock = netPlayer.selectedBlock || null;
+      while (rp.handSlot.children.length > 0) {
+        rp.handSlot.remove(rp.handSlot.children[0]);
+      }
+      if (netPlayer.selectedBlock && netPlayer.selectedBlock in BLOCK_DEFS) {
+        const mat = getBlockMaterial(netPlayer.selectedBlock as BlockType);
+        const geo = new THREE.BoxGeometry(0.24, 0.24, 0.24);
+        const mesh = new THREE.Mesh(geo, mat);
+        rp.handSlot.add(mesh);
+      }
+    }
+
+    setConnectedPlayers((prev) => {
+      const exists = prev.some((p) => p.id === netPlayer.id);
+      if (exists) {
+        return prev.map((p) => (p.id === netPlayer.id ? netPlayer : p));
+      }
+      return [...prev, netPlayer];
+    });
+  }, [createNetworkPlayerMesh, getBlockMaterial]);
+
+  const removeRemotePlayer = useCallback((playerId: string) => {
+    const scene = sceneRef.current;
+    const rp = remotePlayersRef.current.get(playerId);
+    if (rp && scene) {
+      scene.remove(rp.group);
+      remotePlayersRef.current.delete(playerId);
+    }
+    setConnectedPlayers((prev) => prev.filter((p) => p.id !== playerId));
+  }, []);
+
+  // Wire up real-time multiplayer network listeners
+  useEffect(() => {
+    multiplayerManager.onPlayerJoined = (player) => {
+      upsertRemotePlayer(player);
+      sound.playBonus();
+    };
+
+    multiplayerManager.onPlayerMoved = (player) => {
+      upsertRemotePlayer(player);
+    };
+
+    multiplayerManager.onPlayerLeft = (id) => {
+      removeRemotePlayer(id);
+    };
+
+    multiplayerManager.onPlayerPunched = (id) => {
+      const rp = remotePlayersRef.current.get(id);
+      if (rp) {
+        rp.punchTime = 1.0;
+        sound.playTone(280, 'sine', 0.05, 0.1);
+      }
+    };
+
+    multiplayerManager.onBlockPlaced = (event) => {
+      addBlock(event.x, event.y, event.z, event.type as BlockType);
+      sound.playTone(450, 'triangle', 0.06, 0.15);
+    };
+
+    multiplayerManager.onBlockBroken = (event) => {
+      removeBlock(event.x, event.y, event.z);
+      sound.playTone(320, 'sine', 0.06, 0.15);
+    };
+
+    multiplayerManager.onInitialWorldBlocks = (blocks) => {
+      blocks.forEach((b) => {
+        if (b.type === 'air') {
+          removeBlock(b.x, b.y, b.z);
+        } else if (b.type in BLOCK_DEFS) {
+          addBlock(b.x, b.y, b.z, b.type as BlockType);
+        }
+      });
+    };
+
+    multiplayerManager.onChatMessage = (msg) => {
+      setChatMessages((prev) => [...prev.slice(-30), msg]);
+    };
+
+    return () => {
+      multiplayerManager.leaveRoom();
+    };
+  }, [upsertRemotePlayer, removeRemotePlayer, addBlock, removeBlock]);
+
+  // Host a new online world
+  const handleHostGame = async () => {
+    setIsConnecting(true);
+    setConnectionError(null);
+    const code = MinecraftMultiplayerManager.generateRoomCode();
+    setGeneratedRoomCode(code);
+    setRoomId(code);
+
+    try {
+      await multiplayerManager.hostGame(code, playerName, { x: 0, y: 8, z: 0 });
+      setIsMultiplayerActive(true);
+      setGameStarted(true);
+      setIsConnecting(false);
+      altCursorActiveRef.current = false;
+      setIsCursorFree(false);
+      containerRef.current?.requestPointerLock?.();
+      sound.playBonus();
+    } catch (err) {
+      console.error(err);
+      setConnectionError('Dünya kurulamadı. Lütfen tekrar deneyin.');
+      setIsConnecting(false);
+    }
+  };
+
+  // Join an existing online world
+  const handleJoinGame = async (codeToJoin?: string) => {
+    const code = (codeToJoin || joinCodeInput).trim().toUpperCase();
+    if (!code) {
+      setConnectionError('Lütfen geçerli bir Oda Kodu girin.');
+      return;
+    }
+
+    setIsConnecting(true);
+    setConnectionError(null);
+
+    try {
+      const ok = await multiplayerManager.joinGame(code, playerName, { x: 0, y: 8, z: 0 });
+      if (!ok) {
+        setConnectionError('Oda bulunamadı veya kapatılmış. Oda kodunu kontrol edin.');
+        setIsConnecting(false);
+        return;
+      }
+      setRoomId(code);
+      setIsMultiplayerActive(true);
+      setGameStarted(true);
+      setIsConnecting(false);
+      altCursorActiveRef.current = false;
+      setIsCursorFree(false);
+      containerRef.current?.requestPointerLock?.();
+      sound.playBonus();
+    } catch (err) {
+      console.error(err);
+      setConnectionError('Dünyaya bağlanırken hata oluştu.');
+      setIsConnecting(false);
+    }
+  };
+
+  const handleStartSoloGame = () => {
+    setIsMultiplayerActive(false);
+    setGameStarted(true);
+    altCursorActiveRef.current = false;
+    setIsCursorFree(false);
+    containerRef.current?.requestPointerLock?.();
+    sound.playBonus();
+  };
 
   // TNT explosion
   const explodeTnt = useCallback((cx: number, cy: number, cz: number) => {
@@ -1897,7 +2254,63 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         }
       }
 
-      // multiplayer update removed
+      // 8. Remote multiplayer players lerp interpolation and animation
+      remotePlayersRef.current.forEach((rp) => {
+        // Smooth position lerp
+        rp.group.position.x += (rp.targetX - rp.group.position.x) * 0.25;
+        rp.group.position.y += (rp.targetY - rp.group.position.y) * 0.25;
+        rp.group.position.z += (rp.targetZ - rp.group.position.z) * 0.25;
+
+        // Smooth rotation lerp
+        let diffYaw = rp.targetYaw - rp.group.rotation.y;
+        while (diffYaw < -Math.PI) diffYaw += Math.PI * 2;
+        while (diffYaw > Math.PI) diffYaw -= Math.PI * 2;
+        rp.group.rotation.y += diffYaw * 0.25;
+
+        // Head pitch look
+        rp.head.rotation.x = rp.targetPitch || 0;
+
+        // Walk swing animation
+        const isMoving = Math.hypot(rp.targetX - rp.group.position.x, rp.targetZ - rp.group.position.z) > 0.01;
+        if (isMoving) {
+          rp.walkTime += dt * 8;
+          const legSwing = Math.sin(rp.walkTime) * 0.55;
+          rp.legL.rotation.x = legSwing;
+          rp.legR.rotation.x = -legSwing;
+          rp.armL.rotation.x = -legSwing;
+          if (rp.punchTime <= 0) {
+            rp.armR.rotation.x = legSwing;
+          }
+        } else {
+          rp.legL.rotation.x = 0;
+          rp.legR.rotation.x = 0;
+          rp.armL.rotation.x = 0;
+          if (rp.punchTime <= 0) {
+            rp.armR.rotation.x = 0;
+          }
+        }
+
+        // Punch swing animation
+        if (rp.punchTime > 0) {
+          rp.punchTime = Math.max(0, rp.punchTime - dt * 6.5);
+          const swing = Math.sin(rp.punchTime * Math.PI);
+          rp.armR.rotation.x = -Math.PI / 3 - swing * 1.2;
+        }
+      });
+
+      // Periodic broadcast of our local player state (25 times per second)
+      if (isMultiplayerActive && now - lastNetworkSendRef.current > 40) {
+        lastNetworkSendRef.current = now;
+        multiplayerManager.sendPlayerPosition(
+          pos.x,
+          pos.y,
+          pos.z,
+          pos.yaw,
+          pos.pitch,
+          pos.vy !== 0,
+          selectedBlockRef.current
+        );
+      }
 
       // Render
       if (renderer && scene && camera) {
@@ -1911,7 +2324,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return () => {
       if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
     };
-  }, [gameStarted, cameraView, selectedBlock, score, sendUpdate, isPaused]);
+  }, [gameStarted, cameraView, selectedBlock, score, isPaused, isMultiplayerActive]);
 
   return (
     <div
@@ -1947,74 +2360,221 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         )}
       </button>
 
-      {/* Start Screen */}
+      {/* Start Screen with Multiplayer Room System */}
       {!gameStarted && (
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-950/80 via-slate-950 to-slate-950 flex flex-col items-center justify-center z-50 p-4 border border-purple-500/20 rounded-2xl overflow-hidden shadow-2xl">
-          {/* Animated Background overlay to give that dark crystal cave/dirt feeling */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-purple-950/90 via-slate-950 to-slate-950 flex flex-col items-center justify-center z-50 p-4 border border-purple-500/20 rounded-2xl overflow-y-auto shadow-2xl">
           <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] pointer-events-none" />
-          
+
           {/* Minecraft Title block */}
-          <div className="relative mb-8 text-center select-none scale-90 sm:scale-100 z-10">
-            <h1 className="font-arcade text-5xl md:text-6xl text-slate-300 drop-shadow-[0_4px_0_rgba(0,0,0,0.8)] tracking-wider">
+          <div className="relative mb-5 text-center select-none scale-90 sm:scale-100 z-10">
+            <h1 className="font-arcade text-4xl sm:text-5xl md:text-6xl text-slate-200 drop-shadow-[0_4px_0_rgba(0,0,0,0.85)] tracking-wider">
               MINECRAFT
             </h1>
-            <div className="font-arcade text-[10px] text-slate-400 mt-2 tracking-widest uppercase">
-              JAVA EDITION
+            <div className="font-arcade text-[10px] text-emerald-400 mt-1 tracking-widest uppercase flex items-center justify-center gap-1.5">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              ONLINE ÇOK OYUNCULU SÜRÜM
             </div>
             {/* Pulsing Splash Text */}
-            <div className="absolute -bottom-3 -right-6 rotate-[-15deg] font-arcade text-xs text-yellow-400 drop-shadow-[0_2px_0_rgba(0,0,0,1)] animate-bounce select-none">
-              Hi r/minecraft!!!
+            <div className="absolute -bottom-2 -right-4 rotate-[-12deg] font-arcade text-[11px] text-yellow-300 drop-shadow-[0_2px_0_rgba(0,0,0,1)] animate-bounce select-none">
+              Online Multiplayer!
             </div>
           </div>
 
-          {/* Blocky Buttons Stack */}
-          <div className="flex flex-col gap-2.5 items-center w-full max-w-sm px-4 z-10">
-            <button
-              onClick={() => {
-                setGameStarted(true);
-                altCursorActiveRef.current = false;
-                setIsCursorFree(false);
-                containerRef.current?.requestPointerLock?.();
-                sound.playBonus();
-              }}
-              className="w-full py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] active:border-t-[#2a2a2a] active:border-l-[#2a2a2a] active:border-b-[#8a8a8a] active:border-r-[#8a8a8a] font-arcade text-xs tracking-wide shadow-md transition-all rounded-none cursor-pointer"
-            >
-              Oyuna Başla (100x100 Dünya)
-            </button>
-
-            <button
-              onClick={toggleFullscreen}
-              className="w-full py-2 bg-[#3a3a3a] hover:bg-[#4a4a4a] text-[#ffffa0] border-2 border-t-[#777777] border-l-[#777777] border-b-[#222222] border-r-[#222222] font-arcade text-xs tracking-wide shadow-md rounded-none flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {isFullscreen ? <Minimize className="w-3.5 h-3.5 text-amber-400" /> : <Maximize className="w-3.5 h-3.5 text-amber-400" />}
-              <span>{isFullscreen ? 'Normal Ekran' : 'Tam Ekran Modu'}</span>
-            </button>
-
-            <button
-              disabled
-              className="w-full py-2 bg-[#3a3a3a] text-slate-500 border-2 border-t-slate-600 border-l-slate-600 border-b-slate-800 border-r-slate-800 font-arcade text-xs tracking-wide cursor-not-allowed opacity-50 rounded-none"
-            >
-              Minecraft Realms
-            </button>
-
-            <div className="flex gap-2 w-full mt-1">
-              <button
-                onClick={() => setIsMenuOpen(true)}
-                className="flex-1 py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-xs tracking-wide shadow-md rounded-none"
-              >
-                Options...
-              </button>
-              <button
-                onClick={() => {
-                  if (confirm("Oyundan çıkmak istiyor musunuz?")) {
-                    window.location.reload();
-                  }
-                }}
-                className="flex-1 py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-xs tracking-wide shadow-md rounded-none"
-              >
-                Quit Game
-              </button>
+          {/* Main Card */}
+          <div className="w-full max-w-md bg-slate-900/90 border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] p-5 shadow-2xl z-10 flex flex-col items-center">
+            {/* Player Name Input */}
+            <div className="w-full mb-4">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[10px] font-arcade text-slate-300">OYUNCU KULLANICI ADI:</span>
+                <span className="text-[9px] font-mono text-emerald-400">● Çevrimiçi</span>
+              </div>
+              <input
+                type="text"
+                maxLength={20}
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value)}
+                placeholder="Steve..."
+                className="w-full px-3 py-2 bg-slate-950 border-2 border-t-slate-700 border-l-slate-700 border-b-slate-500 border-r-slate-500 text-amber-300 font-arcade text-xs tracking-wider outline-none text-center focus:border-amber-400"
+              />
             </div>
+
+            {/* Error Notification */}
+            {connectionError && (
+              <div className="w-full mb-3 p-2 bg-rose-950/80 border border-rose-500/60 text-rose-200 text-[10px] font-mono text-center rounded">
+                {connectionError}
+              </div>
+            )}
+
+            {/* MODE 1: MAIN MENU SELECTION */}
+            {roomMode === 'menu' && (
+              <div className="flex flex-col gap-2.5 w-full">
+                {/* 1. Host Game Button */}
+                <button
+                  onClick={() => {
+                    const code = MinecraftMultiplayerManager.generateRoomCode();
+                    setGeneratedRoomCode(code);
+                    setRoomId(code);
+                    setRoomMode('host');
+                    sound.playBonus();
+                  }}
+                  className="w-full py-3 bg-[#15803d] hover:bg-[#16a34a] text-white hover:text-[#ffffa0] border-2 border-t-[#4ade80] border-l-[#4ade80] border-b-[#14532d] border-r-[#14532d] active:border-t-[#14532d] active:border-l-[#14532d] active:border-b-[#4ade80] active:border-r-[#4ade80] font-arcade text-xs tracking-wide shadow-md transition-all rounded-none cursor-pointer flex items-center justify-center gap-2 group"
+                >
+                  <Plus className="w-4 h-4 text-emerald-200 group-hover:scale-110 transition-transform" />
+                  <span>DÜNYA KUR (HOST GAME)</span>
+                </button>
+
+                {/* 2. Join Game Button */}
+                <button
+                  onClick={() => {
+                    setRoomMode('join');
+                    setConnectionError(null);
+                    sound.playTone(440, 'triangle', 0.05);
+                  }}
+                  className="w-full py-3 bg-[#0369a1] hover:bg-[#0284c7] text-white hover:text-[#ffffa0] border-2 border-t-[#38bdf8] border-l-[#38bdf8] border-b-[#0c4a6e] border-r-[#0c4a6e] active:border-t-[#0c4a6e] active:border-l-[#0c4a6e] active:border-b-[#38bdf8] active:border-r-[#38bdf8] font-arcade text-xs tracking-wide shadow-md transition-all rounded-none cursor-pointer flex items-center justify-center gap-2 group"
+                >
+                  <Users className="w-4 h-4 text-sky-200 group-hover:scale-110 transition-transform" />
+                  <span>DÜNYAYA KATIL (JOIN GAME)</span>
+                </button>
+
+                {/* 3. Solo Game Button */}
+                <button
+                  onClick={handleStartSoloGame}
+                  className="w-full py-2.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-xs tracking-wide shadow-md transition-all rounded-none cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Play className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Tek Oyunculu (Solo Çevrimdışı)</span>
+                </button>
+
+                <div className="flex gap-2 w-full mt-1">
+                  <button
+                    onClick={toggleFullscreen}
+                    className="flex-1 py-2 bg-[#333333] hover:bg-[#444444] text-[#ffffa0] border-2 border-t-[#666666] border-l-[#666666] border-b-[#111111] border-r-[#111111] font-arcade text-[10px] tracking-wide shadow-md rounded-none flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    {isFullscreen ? <Minimize className="w-3 h-3 text-amber-400" /> : <Maximize className="w-3 h-3 text-amber-400" />}
+                    <span>{isFullscreen ? 'Normal' : 'Tam Ekran'}</span>
+                  </button>
+                  <button
+                    onClick={() => setIsMenuOpen(true)}
+                    className="flex-1 py-2 bg-[#333333] hover:bg-[#444444] text-[#e0e0e0] hover:text-white border-2 border-t-[#666666] border-l-[#666666] border-b-[#111111] border-r-[#111111] font-arcade text-[10px] tracking-wide shadow-md rounded-none"
+                  >
+                    Seçenekler
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* MODE 2: HOST GAME VIEW */}
+            {roomMode === 'host' && (
+              <div className="flex flex-col gap-3 w-full">
+                <div className="text-center">
+                  <h3 className="font-arcade text-emerald-400 text-xs mb-1">DÜNYA ODA KODUNUZ (MATCH ID)</h3>
+                  <p className="text-[10px] font-mono text-slate-300">Arkadaşın bu kodu girerek dünyana anında bağlanabilir:</p>
+                </div>
+
+                {/* Big Room Code Box with Copy Button */}
+                <div className="flex items-center gap-2 bg-slate-950 p-2.5 border-2 border-dashed border-emerald-500/80 rounded">
+                  <div className="flex-1 font-arcade text-lg sm:text-xl text-center text-amber-300 tracking-widest select-all">
+                    {generatedRoomCode}
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedRoomCode);
+                      setIsCopied(true);
+                      sound.playTone(600, 'triangle', 0.05);
+                      setTimeout(() => setIsCopied(false), 2500);
+                    }}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-arcade text-[10px] flex items-center gap-1 rounded transition-colors cursor-pointer"
+                  >
+                    {isCopied ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5 text-white" />}
+                    <span>{isCopied ? 'KOPYALANDI!' : 'KOPYALA'}</span>
+                  </button>
+                </div>
+
+                <button
+                  onClick={handleHostGame}
+                  disabled={isConnecting}
+                  className="w-full py-3 bg-[#15803d] hover:bg-[#16a34a] text-white hover:text-[#ffffa0] border-2 border-t-[#4ade80] border-l-[#4ade80] border-b-[#14532d] border-r-[#14532d] font-arcade text-xs tracking-wider shadow-lg rounded-none cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {isConnecting ? (
+                    <span className="animate-pulse">DÜNYA KURULUYOR...</span>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4 text-emerald-200" />
+                      <span>DÜNYAYI BAŞLAT & OYNA</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setRoomMode('menu');
+                    setConnectionError(null);
+                  }}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 font-arcade text-[10px] tracking-wide rounded-none cursor-pointer"
+                >
+                  ← Geri Dön
+                </button>
+              </div>
+            )}
+
+            {/* MODE 3: JOIN GAME VIEW */}
+            {roomMode === 'join' && (
+              <div className="flex flex-col gap-3 w-full">
+                <div className="text-center">
+                  <h3 className="font-arcade text-sky-400 text-xs mb-1">DÜNYAYA KATIL (JOIN GAME)</h3>
+                  <p className="text-[10px] font-mono text-slate-300">Arkadaşından aldığın Oda Kodunu (Match ID) gir:</p>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    maxLength={10}
+                    value={joinCodeInput}
+                    onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                    placeholder="ÖRN: MC-8492"
+                    className="flex-1 px-3 py-2 bg-slate-950 border-2 border-sky-600 text-amber-300 font-arcade text-xs tracking-widest text-center uppercase outline-none focus:border-amber-400"
+                  />
+                  <button
+                    onClick={async () => {
+                      try {
+                        const text = await navigator.clipboard.readText();
+                        if (text) setJoinCodeInput(text.trim().toUpperCase());
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-arcade text-[10px] border border-slate-600 rounded-none cursor-pointer"
+                  >
+                    YAPIŞTIR
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => handleJoinGame()}
+                  disabled={isConnecting}
+                  className="w-full py-3 bg-[#0369a1] hover:bg-[#0284c7] text-white hover:text-[#ffffa0] border-2 border-t-[#38bdf8] border-l-[#38bdf8] border-b-[#0c4a6e] border-r-[#0c4a6e] font-arcade text-xs tracking-wider shadow-lg rounded-none cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {isConnecting ? (
+                    <span className="animate-pulse">DÜNYAYA BAĞLANILIYOR...</span>
+                  ) : (
+                    <>
+                      <Users className="w-4 h-4 text-sky-200" />
+                      <span>DÜNYAYA BAĞLAN & OYNA</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setRoomMode('menu');
+                    setConnectionError(null);
+                  }}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 font-arcade text-[10px] tracking-wide rounded-none cursor-pointer"
+                >
+                  ← Geri Dön
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2036,6 +2596,51 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
               <MousePointer className="w-4 h-4" />
               <span>[Alt] {isCursorFree ? 'İmleç Açık' : 'İmleç'}</span>
             </button>
+
+            {/* Multiplayer Room Badge & Info */}
+            {isMultiplayerActive && (
+              <>
+                <button
+                  onClick={() => {
+                    if (roomId) {
+                      navigator.clipboard.writeText(roomId);
+                      setIsCopied(true);
+                      sound.playTone(600, 'triangle', 0.05);
+                      setTimeout(() => setIsCopied(false), 2000);
+                    }
+                  }}
+                  title="Oda Kodunu Kopyala"
+                  className="px-3 py-2 bg-slate-900/90 hover:bg-slate-800 border border-emerald-500/70 rounded-lg text-xs font-arcade shadow-lg flex items-center gap-1.5 cursor-pointer text-emerald-400"
+                >
+                  <Globe className="w-3.5 h-3.5 text-emerald-400 animate-spin-slow" />
+                  <span>Oda: <strong className="text-amber-300">{roomId}</strong></span>
+                  {isCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-400" />}
+                </button>
+
+                <div className="px-2.5 py-2 bg-slate-900/90 border border-slate-700/80 rounded-lg text-xs font-arcade text-slate-200 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-sky-400" />
+                  <span>{connectedPlayers.length + 1} Oyuncu</span>
+                </div>
+
+                <button
+                  onClick={() => {
+                    setIsChatOpen((prev) => !prev);
+                    if (!isChatOpen && document.pointerLockElement) {
+                      document.exitPointerLock();
+                    }
+                  }}
+                  className={`px-3 py-2 border rounded-lg text-xs font-arcade shadow-lg flex items-center gap-1.5 cursor-pointer transition-all ${
+                    isChatOpen
+                      ? 'bg-amber-500 text-slate-950 font-bold border-amber-300'
+                      : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700'
+                  }`}
+                  title="Sohbet [T]"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+                  <span>[T] Sohbet</span>
+                </button>
+              </>
+            )}
           </div>
 
           {/* Alt key free cursor notification banner */}
@@ -2419,7 +3024,113 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
             </div>
           )}
 
-          {/* Chat and Player List removed */}
+          {/* In-Game Chat Box */}
+          {isChatOpen && isMultiplayerActive && (
+            <div className="absolute bottom-20 left-4 z-40 w-80 max-w-[90vw] bg-slate-950/90 border-2 border-t-slate-600 border-l-slate-600 border-b-slate-800 border-r-slate-800 shadow-2xl backdrop-blur-md p-3 select-auto flex flex-col gap-2 rounded">
+              <div className="flex justify-between items-center pb-1.5 border-b border-slate-700/80">
+                <div className="flex items-center gap-1.5 font-arcade text-xs text-amber-300">
+                  <MessageSquare className="w-3.5 h-3.5 text-amber-400" />
+                  <span>DÜNYA SOHBETİ</span>
+                </div>
+                <button
+                  onClick={() => setIsChatOpen(false)}
+                  className="text-slate-400 hover:text-white text-xs font-mono px-1 cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Chat Message History */}
+              <div className="h-36 overflow-y-auto flex flex-col gap-1 pr-1 font-mono text-xs">
+                {chatMessages.length === 0 ? (
+                  <div className="text-slate-500 text-[11px] italic my-auto text-center">
+                    Henüz mesaj yok. Arkadaşlarına merhaba de!
+                  </div>
+                ) : (
+                  chatMessages.map((msg, i) => (
+                    <div key={i} className="leading-snug break-words">
+                      <span className="font-bold text-emerald-400">&lt;{msg.name}&gt; </span>
+                      <span className="text-slate-200">{msg.text}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Chat Input */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (chatInput.trim()) {
+                    multiplayerManager.sendChat(chatInput);
+                    setChatMessages((prev) => [
+                      ...prev.slice(-30),
+                      {
+                        id: multiplayerManager.myPlayerId,
+                        name: playerName,
+                        color: '#10b981',
+                        text: chatInput.trim(),
+                        timestamp: Date.now(),
+                      },
+                    ]);
+                    setChatInput('');
+                  }
+                }}
+                className="flex gap-1.5 mt-1"
+              >
+                <input
+                  type="text"
+                  maxLength={120}
+                  autoFocus
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Mesajınızı yazın... [Enter]"
+                  className="flex-1 px-2.5 py-1.5 bg-slate-900 border border-slate-700 text-white font-mono text-xs outline-none focus:border-amber-400 rounded-none"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-arcade text-[10px] font-bold rounded-none cursor-pointer flex items-center justify-center"
+                >
+                  <Send className="w-3 h-3" />
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* Quick Chat Overlay when chat is closed (shows last 3 messages fading) */}
+          {!isChatOpen && isMultiplayerActive && chatMessages.length > 0 && (
+            <div className="absolute bottom-20 left-4 z-20 max-w-sm flex flex-col gap-1 pointer-events-none select-none font-mono text-xs">
+              {chatMessages.slice(-3).map((msg, i) => (
+                <div key={i} className="bg-slate-950/70 px-2.5 py-1 rounded border border-slate-800/80 backdrop-blur-sm text-slate-200">
+                  <span className="font-bold text-emerald-400">&lt;{msg.name}&gt; </span>
+                  <span>{msg.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Player List Overlay (Tab Key) */}
+          {showPlayerList && isMultiplayerActive && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-slate-950/95 border-2 border-emerald-500 p-4 shadow-2xl backdrop-blur-md rounded w-72 max-w-[90vw]">
+              <div className="flex justify-between items-center mb-2 pb-1 border-b border-slate-700">
+                <span className="font-arcade text-xs text-amber-300">OYUNCULAR ({connectedPlayers.length + 1})</span>
+                <span className="font-mono text-[10px] text-emerald-400">Oda: {roomId}</span>
+              </div>
+              <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
+                <div className="flex items-center justify-between px-2 py-1 bg-slate-900 border border-emerald-500/30 rounded text-xs">
+                  <span className="font-arcade text-emerald-300 flex items-center gap-1">
+                    👑 {playerName} (Siz)
+                  </span>
+                  <span className="text-[10px] font-mono text-emerald-400">Ev Sahibi</span>
+                </div>
+                {connectedPlayers.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between px-2 py-1 bg-slate-900/60 border border-slate-800 rounded text-xs">
+                    <span className="font-arcade text-slate-200">{p.name}</span>
+                    <span className="text-[10px] font-mono text-sky-400">Bağlı</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
 

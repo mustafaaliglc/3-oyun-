@@ -55,12 +55,105 @@
         }
       },
       "required": ["playerName", "gameId", "score"]
+    },
+    "GameRoom": {
+      "title": "Game Room",
+      "description": "Minecraft multiplayer game room session",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Unique match room code",
+          "minLength": 3,
+          "maxLength": 20
+        },
+        "hostName": {
+          "type": "string",
+          "description": "Room host player name",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "gameType": {
+          "type": "string",
+          "description": "Game type identifier",
+          "maxLength": 20
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the room",
+          "enum": ["active", "closed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when the room was created"
+        },
+        "lastActive": {
+          "type": "number",
+          "description": "Unix timestamp of last room activity"
+        }
+      },
+      "required": ["roomId", "hostName", "status"]
+    },
+    "RoomPlayer": {
+      "title": "Room Player",
+      "description": "Real-time presence and coordinate state of a player in a room",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique player ID",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of player",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "x": { "type": "number", "description": "X coordinate" },
+        "y": { "type": "number", "description": "Y coordinate" },
+        "z": { "type": "number", "description": "Z coordinate" },
+        "yaw": { "type": "number", "description": "Yaw rotation" },
+        "pitch": { "type": "number", "description": "Pitch rotation" },
+        "isJumping": { "type": "boolean", "description": "Whether player is jumping" },
+        "selectedBlock": { "type": "string", "description": "Held block type or none", "maxLength": 20 },
+        "color": { "type": "string", "description": "Avatar hex color", "maxLength": 20 },
+        "lastSeen": { "type": "number", "description": "Unix timestamp" }
+      },
+      "required": ["id", "name", "x", "y", "z"]
+    },
+    "WorldBlock": {
+      "title": "World Block",
+      "description": "Persistent world block state placed or broken by players",
+      "type": "object",
+      "properties": {
+        "x": { "type": "number", "description": "X coordinate" },
+        "y": { "type": "number", "description": "Y coordinate" },
+        "z": { "type": "number", "description": "Z coordinate" },
+        "type": { "type": "string", "description": "Block type name or air for broken", "maxLength": 20 },
+        "placedBy": { "type": "string", "description": "Player name who placed or broke it", "maxLength": 30 },
+        "timestamp": { "type": "number", "description": "Unix timestamp" }
+      },
+      "required": ["x", "y", "z", "type"]
     }
   },
   "firestore": {
     "/leaderboard/{entryId}": {
       "schema": "LeaderboardEntry",
       "description": "Public leaderboard high score records"
+    },
+    "/rooms/{roomId}": {
+      "schema": "GameRoom",
+      "description": "Active Minecraft multiplayer game rooms"
+    },
+    "/rooms/{roomId}/players/{playerId}": {
+      "schema": "RoomPlayer",
+      "description": "Live player coordinates in the room"
+    },
+    "/rooms/{roomId}/blocks/{blockId}": {
+      "schema": "WorldBlock",
+      "description": "Synchronized placed and destroyed blocks in the room"
     }
   }
 }

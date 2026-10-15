@@ -68,89 +68,188 @@ export const PongGame: React.FC<PongGameProps> = ({ highScore, onUpdateHighScore
     ctx.fill();
   }, []);
 
-  const update = useCallback(() => {
-    if (gameState !== 'PLAYING') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ball = ballRef.current;
-    ball.x += ball.dx;
-    ball.y += ball.dy;
-
-    // Wall bounce
-    if (ball.y <= 0 || ball.y >= canvas.height) ball.dy *= -1;
-
-    // Paddle hit
-    if ((ball.x <= 20 && ball.y >= paddleYRef.current && ball.y <= paddleYRef.current + 80) ||
-        (ball.x >= canvas.width - 20 && ball.y >= paddle2YRef.current && ball.y <= paddle2YRef.current + 80)) {
-      ball.dx *= -1;
-      sound.playTone(300, 'sine', 0.1, 0.1);
-    }
-
-    // Goal & End Game logic (First to 5 wins)
-    let isGameOver = false;
-    if (ball.x < 0) {
-      scoreRef.current.p2 += 1;
-      const totalScore = scoreRef.current.p1 + scoreRef.current.p2;
-      setScore(totalScore);
-      if (scoreRef.current.p2 >= 5) {
-        setGameState('GAME_OVER');
-        isGameOver = true;
-        if (totalScore > highScore) onUpdateHighScore(totalScore);
-      } else {
-        ballRef.current = { x: 200, y: 200, dx: 3, dy: 3 };
-      }
-    } else if (ball.x > canvas.width) {
-      scoreRef.current.p1 += 1;
-      const totalScore = scoreRef.current.p1 + scoreRef.current.p2;
-      setScore(totalScore);
-      if (scoreRef.current.p1 >= 5) {
-        setGameState('GAME_OVER');
-        isGameOver = true;
-        if (totalScore > highScore) onUpdateHighScore(totalScore);
-      } else {
-        ballRef.current = { x: 200, y: 200, dx: -3, dy: 3 };
-      }
-    }
-
-    const ctx = canvas.getContext('2d');
-    if (ctx) draw(ctx, canvas);
-    
-    if (!isGameOver) {
-      animationFrameRef.current = requestAnimationFrame(update);
-    }
-  }, [gameState, draw, highScore, onUpdateHighScore]);
-
-  useEffect(() => {
-    if (gameState === 'PLAYING') {
-      animationFrameRef.current = requestAnimationFrame(update);
-    }
-    return () => {
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+  // Reset ball to center with realistic serve
+  const resetBall = useCallback((serveDirection: number) => {
+    // Random angle between -45 and 45 degrees
+    const angle = (Math.random() * Math.PI / 3) - Math.PI / 6;
+    const speed = 4;
+    ballRef.current = {
+      x: 200,
+      y: 200,
+      dx: serveDirection * speed * Math.cos(angle),
+      dy: speed * Math.sin(angle),
     };
-  }, [gameState, update]);
+  }, []);
+
+  const keysPressed = useRef<{ [key: string]: boolean }>({});
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!canvasRef.current) return;
-      const speed = 30;
-      // Player 1 (W/S)
-      if (e.key === 'w' || e.key === 'W') paddleYRef.current = Math.max(0, paddleYRef.current - speed);
-      if (e.key === 's' || e.key === 'S') paddleYRef.current = Math.min(canvasRef.current.height - 80, paddleYRef.current + speed);
-      // Player 2 (Up/Down)
-      if (e.key === 'ArrowUp') {
+      keysPressed.current[e.key.toLowerCase()] = true;
+      if (['ArrowUp', 'ArrowDown', ' '].includes(e.key)) {
         e.preventDefault();
-        paddle2YRef.current = Math.max(0, paddle2YRef.current - speed);
-      }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        paddle2YRef.current = Math.min(canvasRef.current.height - 80, paddle2YRef.current + speed);
       }
     };
-
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keysPressed.current[e.key.toLowerCase()] = false;
+    };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
   }, []);
+
+  // Main game loop
+  useEffect(() => {
+    if (gameState !== 'PLAYING') {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      return;
+    }
+
+    let isRunning = true;
+
+    const gameLoop = () => {
+      if (!isRunning) return;
+
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        animationFrameRef.current = requestAnimationFrame(gameLoop);
+        return;
+      }
+
+      // Smooth paddle movement
+      const paddleSpeed = 6;
+      const paddleHeight = 80;
+
+      // Player 1 (W / S)
+      if (keysPressed.current['w']) {
+        paddleYRef.current = Math.max(0, paddleYRef.current - paddleSpeed);
+      }
+      if (keysPressed.current['s']) {
+        paddleYRef.current = Math.min(canvas.height - paddleHeight, paddleYRef.current + paddleSpeed);
+      }
+
+      // Player 2 (ArrowUp / ArrowDown)
+      if (keysPressed.current['arrowup']) {
+        paddle2YRef.current = Math.max(0, paddle2YRef.current - paddleSpeed);
+      }
+      if (keysPressed.current['arrowdown']) {
+        paddle2YRef.current = Math.min(canvas.height - paddleHeight, paddle2YRef.current + paddleSpeed);
+      }
+
+      // Ball physics
+      const ball = ballRef.current;
+      ball.x += ball.dx;
+      ball.y += ball.dy;
+
+      const ballRadius = 8;
+
+      // Top & Bottom wall bounce
+      if (ball.y - ballRadius <= 0) {
+        ball.y = ballRadius;
+        ball.dy = Math.abs(ball.dy);
+        sound.playTone(220, 'sine', 0.05, 0.05);
+      } else if (ball.y + ballRadius >= canvas.height) {
+        ball.y = canvas.height - ballRadius;
+        ball.dy = -Math.abs(ball.dy);
+        sound.playTone(220, 'sine', 0.05, 0.05);
+      }
+
+      // Left Paddle Collision (Paddle 1: x: 10, w: 10, span: [10, 20])
+      if (ball.x - ballRadius <= 20 && ball.x + ballRadius >= 10) {
+        if (ball.y >= paddleYRef.current && ball.y <= paddleYRef.current + paddleHeight) {
+          if (ball.dx < 0) {
+            // Hit point relative to center (-1 to 1)
+            const hitOffset = (ball.y - (paddleYRef.current + paddleHeight / 2)) / (paddleHeight / 2);
+            const clampedOffset = Math.max(-1, Math.min(1, hitOffset));
+            const bounceAngle = clampedOffset * (Math.PI / 4); // Max 45 degrees
+            const currentSpeed = Math.min(9, Math.hypot(ball.dx, ball.dy) * 1.05); // slight speedup
+            ball.dx = Math.abs(currentSpeed * Math.cos(bounceAngle));
+            ball.dy = currentSpeed * Math.sin(bounceAngle);
+            ball.x = 20 + ballRadius;
+            sound.playTone(350, 'sine', 0.08, 0.1);
+          }
+        }
+      }
+
+      // Right Paddle Collision (Paddle 2: x: canvas.width - 20, w: 10, span: [width-20, width-10])
+      if (ball.x + ballRadius >= canvas.width - 20 && ball.x - ballRadius <= canvas.width - 10) {
+        if (ball.y >= paddle2YRef.current && ball.y <= paddle2YRef.current + paddleHeight) {
+          if (ball.dx > 0) {
+            const hitOffset = (ball.y - (paddle2YRef.current + paddleHeight / 2)) / (paddleHeight / 2);
+            const clampedOffset = Math.max(-1, Math.min(1, hitOffset));
+            const bounceAngle = clampedOffset * (Math.PI / 4);
+            const currentSpeed = Math.min(9, Math.hypot(ball.dx, ball.dy) * 1.05);
+            ball.dx = -Math.abs(currentSpeed * Math.cos(bounceAngle));
+            ball.dy = currentSpeed * Math.sin(bounceAngle);
+            ball.x = canvas.width - 20 - ballRadius;
+            sound.playTone(400, 'sine', 0.08, 0.1);
+          }
+        }
+      }
+
+      // Scoring
+      let scored = false;
+      if (ball.x < 0) {
+        // Player 2 scored!
+        scoreRef.current.p2 += 1;
+        scored = true;
+        sound.playTone(180, 'triangle', 0.2, 0.15);
+        if (scoreRef.current.p2 >= 5) {
+          isRunning = false;
+          const totalScore = scoreRef.current.p1 + scoreRef.current.p2;
+          setScore(totalScore);
+          setGameState('GAME_OVER');
+          if (totalScore > highScore) onUpdateHighScore(totalScore);
+          return;
+        } else {
+          resetBall(1); // Serve towards P1
+        }
+      } else if (ball.x > canvas.width) {
+        // Player 1 scored!
+        scoreRef.current.p1 += 1;
+        scored = true;
+        sound.playTone(550, 'triangle', 0.2, 0.15);
+        if (scoreRef.current.p1 >= 5) {
+          isRunning = false;
+          const totalScore = scoreRef.current.p1 + scoreRef.current.p2;
+          setScore(totalScore);
+          setGameState('GAME_OVER');
+          if (totalScore > highScore) onUpdateHighScore(totalScore);
+          return;
+        } else {
+          resetBall(-1); // Serve towards P2
+        }
+      }
+
+      if (scored) {
+        setScore(scoreRef.current.p1 + scoreRef.current.p2);
+      }
+
+      // Render
+      const ctx = canvas.getContext('2d');
+      if (ctx) draw(ctx, canvas);
+
+      animationFrameRef.current = requestAnimationFrame(gameLoop);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(gameLoop);
+
+    return () => {
+      isRunning = false;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  }, [gameState, draw, highScore, onUpdateHighScore, resetBall]);
+
+
 
   return (
     <div className="flex flex-col items-center relative">

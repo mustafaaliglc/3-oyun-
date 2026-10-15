@@ -31,11 +31,63 @@ service cloud.firestore {
         && (!('timestamp' in data) || (data.timestamp is number));
     }
 
+    function isValidRoom(data) {
+      return data.keys().hasAll(['roomId', 'hostName', 'status'])
+        && data.roomId is string && data.roomId.size() >= 3 && data.roomId.size() <= 30
+        && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 30
+        && data.status is string && (data.status == 'active' || data.status == 'closed')
+        && (!('gameType' in data) || (data.gameType is string && data.gameType.size() <= 30))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 40))
+        && (!('lastActive' in data) || (data.lastActive is number));
+    }
+
+    function isValidPlayer(data) {
+      return data.keys().hasAll(['id', 'name', 'x', 'y', 'z'])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 64
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 30
+        && data.x is number && data.y is number && data.z is number
+        && (!('yaw' in data) || data.yaw is number)
+        && (!('pitch' in data) || data.pitch is number)
+        && (!('isJumping' in data) || data.isJumping is bool)
+        && (!('selectedBlock' in data) || data.selectedBlock == null || (data.selectedBlock is string && data.selectedBlock.size() <= 20))
+        && (!('color' in data) || (data.color is string && data.color.size() <= 20))
+        && (!('lastSeen' in data) || data.lastSeen is number);
+    }
+
+    function isValidBlock(data) {
+      return data.keys().hasAll(['x', 'y', 'z', 'type'])
+        && data.x is number && data.y is number && data.z is number
+        && data.type is string && data.type.size() <= 20
+        && (!('placedBy' in data) || (data.placedBy is string && data.placedBy.size() <= 30))
+        && (!('timestamp' in data) || data.timestamp is number);
+    }
+
     // Leaderboard collection
     match /leaderboard/{entryId} {
       allow read: if true;
       allow create: if isValidId(entryId) && isValidLeaderboardEntry(request.resource.data);
       allow update, delete: if false;
+    }
+
+    // Multiplayer Game Rooms
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create, update: if isValidId(roomId) && isValidRoom(request.resource.data);
+      allow delete: if isValidId(roomId);
+
+      // Player coordinates inside room
+      match /players/{playerId} {
+        allow read: if true;
+        allow create, update: if isValidId(roomId) && isValidId(playerId) && isValidPlayer(request.resource.data);
+        allow delete: if isValidId(roomId) && isValidId(playerId);
+      }
+
+      // Synchronized world blocks inside room
+      match /blocks/{blockId} {
+        allow read: if true;
+        allow create, update: if isValidId(roomId) && isValidId(blockId) && isValidBlock(request.resource.data);
+        allow delete: if isValidId(roomId) && isValidId(blockId);
+      }
     }
   }
 }

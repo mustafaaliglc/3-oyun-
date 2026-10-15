@@ -1,6 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, Menu, Gamepad2, Trophy, RotateCcw, Database } from 'lucide-react';
-import { GameId } from '../types/game';
+import { Volume2, VolumeX, Menu, Gamepad2, Database } from 'lucide-react';
 
 interface HeaderProps {
   activeGameTitle: string;
@@ -41,30 +40,8 @@ export const Header: React.FC<HeaderProps> = ({
         </a>
       </div>
 
-      {/* Zone 2: Navigation / Active Status (Text with separators) */}
-      <div className="hidden md:flex items-center gap-3 text-xs text-slate-400">
-        <span>Aktif Oyun: <strong className="text-white font-medium">{activeGameTitle}</strong></span>
-        <span aria-hidden="true">·</span>
-        <span>3 Oyun Odası</span>
-        <span aria-hidden="true">·</span>
-        <span className="flex items-center gap-1 text-amber-400 font-medium">
-          <Trophy className="w-3.5 h-3.5" />
-          Toplam Rekor: {totalScore}
-        </span>
-      </div>
-
-      {/* Zone 3: Actions (Socket.io Status, Leaderboard & Sound) */}
+      {/* Zone 3: Actions (Leaderboard & Sound) */}
       <div className="flex items-center gap-2">
-        {/* Socket.io Live Server Status Badge */}
-        <div
-          title="Socket.io Gerçek Zamanlı Sunucu Aktif (Node.js & Socket.io)"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-sm"
-        >
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="hidden sm:inline font-mono">Socket.io v4 Aktif</span>
-          <span className="sm:hidden font-mono">Socket.io</span>
-        </div>
-
         <button
           onClick={onOpenLeaderboard}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition-all shadow-sm active:scale-95"
