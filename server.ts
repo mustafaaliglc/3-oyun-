@@ -250,6 +250,36 @@ io.on('connection', (socket: Socket) => {
         action: data.action,
         timestamp: player.lastSeen,
       });
+      socket.to(joinedRoom).emit('oyuncuHareketi', {
+        id: assignedPlayerId,
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        yaw: player.yaw,
+        pitch: player.pitch,
+        isJumping: player.isJumping,
+        selectedBlock: player.selectedBlock,
+        speed: player.speed,
+        timestamp: player.lastSeen,
+      });
+    }
+  });
+
+  socket.on('oyuncuHareketi', (data: Partial<PlayerState>) => {
+    if (!joinedRoom || !rooms[joinedRoom]) return;
+    const room = rooms[joinedRoom];
+    const player = room.players.get(assignedPlayerId);
+    if (player) {
+      if (data.x !== undefined) player.x = data.x;
+      if (data.y !== undefined) player.y = data.y;
+      if (data.z !== undefined) player.z = data.z;
+      if (data.yaw !== undefined) player.yaw = data.yaw;
+      if (data.pitch !== undefined) player.pitch = data.pitch;
+      if (data.isJumping !== undefined) player.isJumping = data.isJumping;
+      if (data.selectedBlock !== undefined) player.selectedBlock = data.selectedBlock;
+      player.lastSeen = Date.now();
+      socket.to(joinedRoom).emit('player_moved', { ...player, id: assignedPlayerId });
+      socket.to(joinedRoom).emit('oyuncuHareketi', { ...player, id: assignedPlayerId });
     }
   });
 
@@ -286,6 +316,39 @@ io.on('connection', (socket: Socket) => {
       z: rz,
       playerId: assignedPlayerId,
     });
+    socket.to(joinedRoom).emit('blokDegisti', {
+      x: rx,
+      y: ry,
+      z: rz,
+      type: 'air',
+      action: 'break',
+      playerId: assignedPlayerId,
+    });
+  });
+
+  // 4b. Minecraft blokDegisti event alias
+  socket.on('blokDegisti', (data: { x: number; y: number; z: number; type: string; action?: string }) => {
+    if (!joinedRoom) return;
+    const rx = Math.round(data.x);
+    const ry = Math.round(data.y);
+    const rz = Math.round(data.z);
+    const key = `${rx},${ry},${rz}`;
+    const blockType = (data.action === 'break' || data.type === 'air') ? 'air' : (data.type || 'stone');
+    getRoomBlockMap(joinedRoom).set(key, blockType);
+
+    if (blockType === 'air') {
+      socket.to(joinedRoom).emit('mc_block_broken', { x: rx, y: ry, z: rz, playerId: assignedPlayerId });
+    } else {
+      socket.to(joinedRoom).emit('mc_block_placed', { x: rx, y: ry, z: rz, type: blockType, playerId: assignedPlayerId });
+    }
+    socket.to(joinedRoom).emit('blokDegisti', {
+      x: rx,
+      y: ry,
+      z: rz,
+      type: blockType,
+      action: data.action || (blockType === 'air' ? 'break' : 'place'),
+      playerId: assignedPlayerId,
+    });
   });
 
   // 5. Minecraft Real-time Player Punch / Arm Swing
@@ -293,6 +356,31 @@ io.on('connection', (socket: Socket) => {
     if (!joinedRoom) return;
     socket.to(joinedRoom).emit('mc_player_punched', {
       id: assignedPlayerId,
+    });
+  });
+
+  // 6. PVP Player Hit & Damage / Knockback
+  socket.on('playerHit', (data: { targetId: string; damage?: number; knockX?: number; knockZ?: number }) => {
+    if (!joinedRoom) return;
+    io.to(joinedRoom).emit('playerHit', {
+      attackerId: assignedPlayerId,
+      targetId: data.targetId,
+      damage: data.damage ?? 4,
+      knockX: data.knockX ?? 0,
+      knockZ: data.knockZ ?? 0,
+      timestamp: Date.now(),
+    });
+  });
+
+  socket.on('player_hit', (data: { targetId: string; damage?: number; knockX?: number; knockZ?: number }) => {
+    if (!joinedRoom) return;
+    io.to(joinedRoom).emit('playerHit', {
+      attackerId: assignedPlayerId,
+      targetId: data.targetId,
+      damage: data.damage ?? 4,
+      knockX: data.knockX ?? 0,
+      knockZ: data.knockZ ?? 0,
+      timestamp: Date.now(),
     });
   });
 

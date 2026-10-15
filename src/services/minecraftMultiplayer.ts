@@ -33,6 +33,7 @@ export interface BlockEvent {
   type: string;
   playerId?: string;
   placedBy?: string;
+  placedById?: string;
 }
 
 export class MinecraftMultiplayerManager {
@@ -50,6 +51,7 @@ export class MinecraftMultiplayerManager {
   public onPlayerMoved?: (player: NetworkPlayer) => void;
   public onPlayerLeft?: (id: string) => void;
   public onPlayerPunched?: (id: string) => void;
+  public onPlayerHit?: (hit: { attackerId: string; targetId: string; damage: number; knockX: number; knockZ: number }) => void;
   public onBlockPlaced?: (event: BlockEvent) => void;
   public onBlockBroken?: (event: BlockEvent) => void;
   public onInitialWorldBlocks?: (blocks: BlockEvent[]) => void;
@@ -178,6 +180,12 @@ export class MinecraftMultiplayerManager {
         }
       });
 
+      this.socket.on('oyuncuHareketi', (data: NetworkPlayer) => {
+        if (data && data.id !== this.myPlayerId && this.onPlayerMoved) {
+          this.onPlayerMoved(data);
+        }
+      });
+
       this.socket.on('player_left', (data: { id: string }) => {
         if (data && data.id && this.onPlayerLeft) {
           this.onPlayerLeft(data.id);
@@ -196,9 +204,24 @@ export class MinecraftMultiplayerManager {
         }
       });
 
+      this.socket.on('blokDegisti', (data: BlockEvent & { action?: string }) => {
+        if (!data || data.playerId === this.myPlayerId) return;
+        if (data.type === 'air' || data.action === 'break') {
+          this.onBlockBroken?.(data);
+        } else {
+          this.onBlockPlaced?.(data);
+        }
+      });
+
       this.socket.on('mc_player_punched', (data: { id: string }) => {
         if (data && data.id && data.id !== this.myPlayerId && this.onPlayerPunched) {
           this.onPlayerPunched(data.id);
+        }
+      });
+
+      this.socket.on('playerHit', (data: { attackerId: string; targetId: string; damage: number; knockX: number; knockZ: number }) => {
+        if (data && this.onPlayerHit) {
+          this.onPlayerHit(data);
         }
       });
 
@@ -282,7 +305,7 @@ export class MinecraftMultiplayerManager {
       this.unsubscribeBlocks = onSnapshot(blocksCol, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           const b = change.doc.data() as BlockEvent;
-          if (b.placedBy === this.playerName) return; // Ignore own echoes
+          if (b.playerId === this.myPlayerId || b.placedById === this.myPlayerId) return; // Ignore own echoes safely
           if (b.type === 'air') {
             this.onBlockBroken?.(b);
           } else {
@@ -303,7 +326,8 @@ export class MinecraftMultiplayerManager {
 
     // Fast path: Socket.io broadcast to all peers in the room
     if (this.socket?.connected) {
-      this.socket.emit('player_update', {
+      const payload = {
+        id: this.myPlayerId,
         x: Math.round(x * 100) / 100,
         y: Math.round(y * 100) / 100,
         z: Math.round(z * 100) / 100,
@@ -311,7 +335,9 @@ export class MinecraftMultiplayerManager {
         pitch: Math.round(pitch * 100) / 100,
         isJumping,
         selectedBlock,
-      });
+      };
+      this.socket.emit('player_update', payload);
+      this.socket.emit('oyuncuHareketi', payload);
     }
 
     // Throttled Firestore update every 2.5 seconds to conserve quota while maintaining state
@@ -345,7 +371,8 @@ export class MinecraftMultiplayerManager {
     const rz = Math.round(z);
 
     // 1. Instant Socket.io emission
-    this.socket?.emit('mc_block_place', { x: rx, y: ry, z: rz, type });
+    this.socket?.emit('mc_block_place', { x: rx, y: ry, z: rz, type, playerId: this.myPlayerId });
+    this.socket?.emit('blokDegisti', { x: rx, y: ry, z: rz, type, action: 'place', playerId: this.myPlayerId });
 
     // 2. Persistent Firestore write
     const blockDocId = `${rx}_${ry}_${rz}`;
@@ -357,6 +384,8 @@ export class MinecraftMultiplayerManager {
         z: rz,
         type,
         placedBy: this.playerName,
+        placedById: this.myPlayerId,
+        playerId: this.myPlayerId,
         timestamp: Date.now(),
       });
     } catch (err) {
@@ -372,7 +401,8 @@ export class MinecraftMultiplayerManager {
     const rz = Math.round(z);
 
     // 1. Instant Socket.io emission
-    this.socket?.emit('mc_block_break', { x: rx, y: ry, z: rz });
+    this.socket?.emit('mc_block_break', { x: rx, y: ry, z: rz, playerId: this.myPlayerId });
+    this.socket?.emit('blokDegisti', { x: rx, y: ry, z: rz, type: 'air', action: 'break', playerId: this.myPlayerId });
 
     // 2. Persistent Firestore write
     const blockDocId = `${rx}_${ry}_${rz}`;
@@ -384,6 +414,8 @@ export class MinecraftMultiplayerManager {
         z: rz,
         type: 'air',
         placedBy: this.playerName,
+        placedById: this.myPlayerId,
+        playerId: this.myPlayerId,
         timestamp: Date.now(),
       });
     } catch (err) {
@@ -395,6 +427,18 @@ export class MinecraftMultiplayerManager {
   public sendPunch(): void {
     if (this.socket?.connected) {
       this.socket.emit('mc_player_punch');
+    }
+  }
+
+  // 8. PVP Hit Player
+  public sendHitPlayer(targetId: string, damage = 4, knockX = 0, knockZ = 0): void {
+    if (this.socket?.connected) {
+      this.socket.emit('playerHit', {
+        targetId,
+        damage,
+        knockX,
+        knockZ,
+      });
     }
   }
 

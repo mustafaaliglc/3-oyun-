@@ -564,7 +564,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     name: string;
     color: string;
     group: THREE.Group;
+    collider: THREE.Mesh;
     head: THREE.Mesh;
+    torso: THREE.Mesh;
     armL: THREE.Mesh;
     armR: THREE.Mesh;
     legL: THREE.Mesh;
@@ -578,9 +580,15 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     targetPitch: number;
     walkTime: number;
     punchTime: number;
+    damageFlashTimer: number;
+    origColors: { head: string; torso: string; arms: string; legs: string };
   }
 
+  const [damageVignette, setDamageVignette] = useState<boolean>(false);
   const remotePlayersRef = useRef<Map<string, RemotePlayerObject>>(new Map());
+  const steveArmLRef = useRef<THREE.Mesh | null>(null);
+  const steveLegLRef = useRef<THREE.Mesh | null>(null);
+  const steveLegRRef = useRef<THREE.Mesh | null>(null);
   const lastNetworkSendRef = useRef<number>(0);
   const isJumpingRef = useRef<boolean>(false);
   const selectedBlockRef = useRef<BlockType | null>(selectedBlock);
@@ -936,11 +944,14 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     torso.position.y = 1.4;
     steve.add(torso);
 
-    // Left Arm
+    // Left Arm (with translated shoulder pivot)
     const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
-    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.2, 0.35), armMat);
-    armL.position.set(-0.65, 1.4, 0);
+    const armLGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+    armLGeo.translate(0, -0.4, 0);
+    const armL = new THREE.Mesh(armLGeo, armMat);
+    armL.position.set(-0.65, 1.8, 0);
     steve.add(armL);
+    steveArmLRef.current = armL;
 
     // Right Arm (Unique mesh with translated shoulder pivot)
     const armRGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
@@ -950,15 +961,21 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     steve.add(armR);
     rightArmRef.current = armR; // Save ref for held item attachment
 
-    // Blue Pants & Legs
+    // Blue Pants & Legs (with translated hip pivots)
     const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
-    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), pantsMat);
-    legL.position.set(-0.25, 0.5, 0);
+    const legLGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
+    legLGeo.translate(0, -0.5, 0);
+    const legL = new THREE.Mesh(legLGeo, pantsMat);
+    legL.position.set(-0.25, 0.8, 0);
     steve.add(legL);
+    steveLegLRef.current = legL;
 
-    const legR = legL.clone();
-    legR.position.x = 0.25;
+    const legRGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
+    legRGeo.translate(0, -0.5, 0);
+    const legR = new THREE.Mesh(legRGeo, pantsMat);
+    legR.position.set(0.25, 0.8, 0);
     steve.add(legR);
+    steveLegRRef.current = legR;
 
     return steve;
   };
@@ -1086,14 +1103,29 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     sprite.position.y = 3.3;
     group.add(sprite);
 
+    // 7. Raycast Hitbox Collider for PVP (covers the full bounding volume of the player)
+    const colliderGeo = new THREE.BoxGeometry(1.0, 2.4, 0.8);
+    const colliderMat = new THREE.MeshBasicMaterial({ visible: false, wireframe: false });
+    const collider = new THREE.Mesh(colliderGeo, colliderMat);
+    collider.position.y = 1.3;
+    group.add(collider);
+
     return {
       group,
+      collider,
       head,
+      torso,
       armL,
       armR,
       legL,
       legR,
       handSlot,
+      origColors: {
+        head: '#fcd34d',
+        torso: colorHex || '#10b981',
+        arms: '#fcd34d',
+        legs: '#1e3a8a',
+      },
     };
   }, []);
 
@@ -1106,6 +1138,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     if (!rp) {
       const isHostPlayer = !multiplayerManager.isHost;
       const meshData = createNetworkPlayerMesh(netPlayer.name, netPlayer.color, isHostPlayer);
+      meshData.collider.userData = { isPlayerCollider: true, playerId: netPlayer.id, name: netPlayer.name };
       meshData.group.position.set(netPlayer.x, netPlayer.y, netPlayer.z);
       scene.add(meshData.group);
 
@@ -1114,7 +1147,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         name: netPlayer.name,
         color: netPlayer.color,
         group: meshData.group,
+        collider: meshData.collider,
         head: meshData.head,
+        torso: meshData.torso,
         armL: meshData.armL,
         armR: meshData.armR,
         legL: meshData.legL,
@@ -1128,6 +1163,8 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         targetPitch: netPlayer.pitch || 0,
         walkTime: 0,
         punchTime: 0,
+        damageFlashTimer: 0,
+        origColors: meshData.origColors,
       };
       remotePlayersRef.current.set(netPlayer.id, rp);
     } else {
@@ -1191,6 +1228,30 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       if (rp) {
         rp.punchTime = 1.0;
         sound.playTone(280, 'sine', 0.05, 0.1);
+      }
+    };
+
+    multiplayerManager.onPlayerHit = (hit) => {
+      if (hit.targetId === multiplayerManager.myPlayerId) {
+        // We got hit by another player!
+        setHealth((h) => Math.max(0, h - hit.damage));
+        setDamageVignette(true);
+        setTimeout(() => setDamageVignette(false), 350);
+        sound.playTone(160, 'sawtooth', 0.12, 0.35);
+
+        // Apply knockback to local player
+        playerPosRef.current.x += hit.knockX;
+        playerPosRef.current.z += hit.knockZ;
+        playerPosRef.current.vy = 0.28;
+      } else {
+        // Another player got hit!
+        const rp = remotePlayersRef.current.get(hit.targetId);
+        if (rp) {
+          rp.damageFlashTimer = 0.5;
+          rp.targetX += hit.knockX;
+          rp.targetZ += hit.knockZ;
+          sound.playTone(200, 'sawtooth', 0.08, 0.2);
+        }
       }
     };
 
@@ -1695,16 +1756,60 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
       const cowGroups = mobsRef.current.map((mob) => mob.mesh);
 
-      // Raycast against both blocks and cows
-      const intersectsBlocks = raycaster.intersectObjects(blockMeshes, false);
+      const playerColliders: THREE.Mesh[] = [];
+      remotePlayersRef.current.forEach((rp) => {
+        if (rp.collider) playerColliders.push(rp.collider);
+      });
+
+      // Raycast against other players (PVP), mobs (cows), and world blocks
+      const intersectsPlayers = raycaster.intersectObjects(playerColliders, false);
       const intersectsCows = raycaster.intersectObjects(cowGroups, true);
+      const intersectsBlocks = raycaster.intersectObjects(blockMeshes, false);
 
-      const hitBlock = intersectsBlocks.length > 0 ? intersectsBlocks[0] : null;
+      const hitPlayer = intersectsPlayers.length > 0 ? intersectsPlayers[0] : null;
       const hitCow = intersectsCows.length > 0 ? intersectsCows[0] : null;
+      const hitBlock = intersectsBlocks.length > 0 ? intersectsBlocks[0] : null;
 
-      // ATTACK COW MOB IF CLOSER THAN THE NEAREST BLOCK
+      // 1. PVP ATTACK ON OTHER PLAYERS (LEFT CLICK)
+      if (hitPlayer && (!hitBlock || hitPlayer.distance < hitBlock.distance) && (!hitCow || hitPlayer.distance < hitCow.distance)) {
+        if (e.button === 0) {
+          punchAnimRef.current = 1.0;
+          sendPlayerPunch();
+
+          const targetPlayerId = hitPlayer.object.userData.playerId;
+          const targetRp = remotePlayersRef.current.get(targetPlayerId);
+
+          if (targetRp) {
+            // Directional knockback away from attacker
+            const angle = playerPosRef.current.yaw;
+            const knockX = -Math.sin(angle) * 1.5;
+            const knockZ = -Math.cos(angle) * 1.5;
+
+            // Transmit PVP hit across network (Socket.io playerHit)
+            multiplayerManager.sendHitPlayer(targetPlayerId, 4, knockX, knockZ);
+
+            // Immediate responsive feedback on local client
+            targetRp.damageFlashTimer = 0.5;
+            targetRp.targetX += knockX;
+            targetRp.targetZ += knockZ;
+            sound.playTone(160, 'sawtooth', 0.1, 0.35);
+
+            setScore((s) => {
+              const newScore = s + 10;
+              onUpdateHighScore(newScore);
+              return newScore;
+            });
+          }
+        }
+        return;
+      }
+
+      // 2. ATTACK COW MOB IF CLOSER THAN THE NEAREST BLOCK
       if (hitCow && (!hitBlock || hitCow.distance < hitBlock.distance)) {
         if (e.button === 0) {
+          punchAnimRef.current = 1.0;
+          sendPlayerPunch();
+
           const hitSubmesh = hitCow.object;
           let parentGroup: THREE.Object3D | null = hitSubmesh;
           while (parentGroup && !parentGroup.name.startsWith('cow_') && parentGroup.parent !== scene) {
@@ -1760,18 +1865,19 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         return;
       }
 
-      // BLOCKS INTERACTIONS (ONLY IF WE ARE NOT INTERACTING WITH A COW)
+      // 3. BLOCKS INTERACTIONS (ONLY IF WE ARE NOT INTERACTING WITH A PLAYER OR COW)
       if (!hitBlock) return;
 
-      const hit = hitBlock;
-      const hitPos = hit.point.clone().sub(hit.face!.normal.clone().multiplyScalar(0.1));
-      const bx = Math.round(hitPos.x);
-      const by = Math.round(hitPos.y);
-      const bz = Math.round(hitPos.z);
+      const targetMesh = hitBlock.object as THREE.Mesh;
+      const bx = Math.round(targetMesh.position.x);
+      const by = Math.round(targetMesh.position.y);
+      const bz = Math.round(targetMesh.position.z);
 
       if (e.button === 0) {
         // LEFT CLICK: MINE / BREAK BLOCK
+        punchAnimRef.current = 1.0;
         sendPlayerPunch();
+
         const minedType = removeBlock(bx, by, bz);
         if (minedType) {
           sendBlockBreak(bx, by, bz);
@@ -1796,28 +1902,44 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       } else if (e.button === 2) {
         // RIGHT CLICK: PLACE SELECTED BLOCK ON FACE
         e.preventDefault();
-        if (removeFromInventory(selectedBlock)) { // Remove from inventory
-          const placePos = hit.point.clone().add(hit.face!.normal.clone().multiplyScalar(0.4));
-          const px = Math.round(placePos.x);
-          const py = Math.round(placePos.y);
-          const pz = Math.round(placePos.z);
+        punchAnimRef.current = 1.0;
 
-          // Don't place inside player
-          const player = playerPosRef.current;
-          if (Math.hypot(px - player.x, pz - player.z) > 0.6 || Math.abs(py - player.y) > 1.8) {
-            addBlock(px, py, pz, selectedBlock!);
-            sendBlockPlace(px, py, pz, selectedBlock!);
-            sendPlayerPunch();
-            sound.playTone(450, 'triangle', 0.07, 0.2);
-            setBlocksPlaced((p) => p + 1);
-            setScore((s) => {
-              const newScore = s + 5;
-              onUpdateHighScore(newScore);
-              return newScore;
-            });
-          } else if (selectedBlock) {
-            addToInventory(selectedBlock); // Refund if unable to place
-          }
+        const normal = hitBlock.face ? hitBlock.face.normal : new THREE.Vector3(0, 1, 0);
+        const px = bx + Math.round(normal.x);
+        const py = by + Math.round(normal.y);
+        const pz = bz + Math.round(normal.z);
+
+        // Physics check: prevent blocks from floating in mid-air (must connect to an existing block or ground)
+        const hasSupport = py <= 0 ||
+          worldBlocksRef.current.has(`${px},${py - 1},${pz}`) ||
+          worldBlocksRef.current.has(`${px},${py + 1},${pz}`) ||
+          worldBlocksRef.current.has(`${px + 1},${py},${pz}`) ||
+          worldBlocksRef.current.has(`${px - 1},${py},${pz}`) ||
+          worldBlocksRef.current.has(`${px},${py},${pz + 1}`) ||
+          worldBlocksRef.current.has(`${px},${py},${pz - 1}`);
+
+        if (!hasSupport) {
+          sound.playTone(180, 'sawtooth', 0.08, 0.1);
+          return;
+        }
+
+        // Don't place inside player
+        const player = playerPosRef.current;
+        if (Math.hypot(px - player.x, pz - player.z) <= 0.6 && Math.abs(py - player.y) <= 1.8) {
+          return;
+        }
+
+        if (removeFromInventory(selectedBlock)) { // Remove from inventory
+          addBlock(px, py, pz, selectedBlock!);
+          sendBlockPlace(px, py, pz, selectedBlock!);
+          sendPlayerPunch();
+          sound.playTone(450, 'triangle', 0.07, 0.2);
+          setBlocksPlaced((p) => p + 1);
+          setScore((s) => {
+            const newScore = s + 5;
+            onUpdateHighScore(newScore);
+            return newScore;
+          });
         } else {
           sound.playTone(200, 'sawtooth', 0.1, 0.1); // No block sound
         }
@@ -2219,20 +2341,29 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         );
       }
 
-      if (steve && cameraView === 'third' && rightArmRef.current) {
-        if (punchAnimRef.current > 0) {
-          punchAnimRef.current = Math.max(0, punchAnimRef.current - dt * 6.5);
-        }
-        // Walk swing vs punching swing in third person
+      if (steve && cameraView === 'third') {
         const isWalking = dx !== 0 || dz !== 0;
-        const swing = Math.sin(punchAnimRef.current * Math.PI);
-        
-        if (punchAnimRef.current > 0) {
-          rightArmRef.current.rotation.x = -Math.PI / 3.5 - swing * 1.2;
-        } else if (isWalking) {
-          rightArmRef.current.rotation.x = -Math.PI / 3.5 + Math.sin(now * 0.015) * 0.15;
+        if (isWalking) {
+          const legSwing = Math.sin(now * 0.012) * 0.65;
+          if (steveLegLRef.current) steveLegLRef.current.rotation.x = legSwing;
+          if (steveLegRRef.current) steveLegRRef.current.rotation.x = -legSwing;
+          if (steveArmLRef.current) steveArmLRef.current.rotation.x = -legSwing;
         } else {
-          rightArmRef.current.rotation.x = -Math.PI / 3.5;
+          if (steveLegLRef.current) steveLegLRef.current.rotation.x = 0;
+          if (steveLegRRef.current) steveLegRRef.current.rotation.x = 0;
+          if (steveArmLRef.current) steveArmLRef.current.rotation.x = 0;
+        }
+
+        if (rightArmRef.current) {
+          if (punchAnimRef.current > 0) {
+            punchAnimRef.current = Math.max(0, punchAnimRef.current - dt * 6.5);
+            const swing = Math.sin(punchAnimRef.current * Math.PI);
+            rightArmRef.current.rotation.x = -Math.PI / 3.5 - swing * 1.2;
+          } else if (isWalking) {
+            rightArmRef.current.rotation.x = -Math.PI / 3.5 + Math.sin(now * 0.012) * 0.15;
+          } else {
+            rightArmRef.current.rotation.x = -Math.PI / 3.5;
+          }
         }
       }
 
@@ -2269,6 +2400,25 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
         // Head pitch look
         rp.head.rotation.x = rp.targetPitch || 0;
+
+        // Damage Flash Effect on remote players
+        if (rp.damageFlashTimer > 0) {
+          rp.damageFlashTimer -= dt;
+          const flashColor = 0xff3333;
+          (rp.head.material as THREE.MeshStandardMaterial).color.setHex(flashColor);
+          (rp.torso.material as THREE.MeshStandardMaterial).color.setHex(flashColor);
+          (rp.armL.material as THREE.MeshStandardMaterial).color.setHex(flashColor);
+          (rp.armR.material as THREE.MeshStandardMaterial).color.setHex(flashColor);
+          (rp.legL.material as THREE.MeshStandardMaterial).color.setHex(flashColor);
+          (rp.legR.material as THREE.MeshStandardMaterial).color.setHex(flashColor);
+        } else {
+          (rp.head.material as THREE.MeshStandardMaterial).color.set(rp.origColors.head);
+          (rp.torso.material as THREE.MeshStandardMaterial).color.set(rp.origColors.torso);
+          (rp.armL.material as THREE.MeshStandardMaterial).color.set(rp.origColors.arms);
+          (rp.armR.material as THREE.MeshStandardMaterial).color.set(rp.origColors.arms);
+          (rp.legL.material as THREE.MeshStandardMaterial).color.set(rp.origColors.legs);
+          (rp.legR.material as THREE.MeshStandardMaterial).color.set(rp.origColors.legs);
+        }
 
         // Walk swing animation
         const isMoving = Math.hypot(rp.targetX - rp.group.position.x, rp.targetZ - rp.group.position.z) > 0.01;
@@ -2340,6 +2490,11 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         ref={containerRef}
         className={`w-full h-full ${isCursorFree ? 'cursor-default' : 'cursor-crosshair'} ${gameStarted ? '' : 'hidden'}`}
       />
+
+      {/* Red Hurt Damage Screen Flash Vignette */}
+      {damageVignette && (
+        <div className="absolute inset-0 bg-rose-600/35 pointer-events-none z-30 animate-pulse transition-opacity duration-150 ring-inset ring-8 ring-rose-500/80" />
+      )}
 
       {/* Floating Tam Ekran / Full Mod Button */}
       <button
