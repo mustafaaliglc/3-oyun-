@@ -3,8 +3,8 @@ import * as THREE from 'three';
 import { sound } from '../../utils/audio';
 import { GameInfo, GameSettings } from '../../types/game';
 import { GameMenuModal } from '../GameMenuModal';
-import {
-  Box,
+import { SettingsPanel } from '../SettingsPanel';
+import {  Box,
   Pickaxe,
   Hammer,
   Eye,
@@ -530,12 +530,27 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const [isDayTime, setIsDayTime] = useState<boolean>(true);
   const [tntNotice, setTntNotice] = useState<string | null>(null);
   const [playerColor, setPlayerColor] = useState<string>('#10b981');
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [settings, setSettings] = useState<GameSettings>({
-    graphicsQuality: 'high',
+    renderDistance: 8,
+    mouseSensitivity: 1.0,
     soundVolume: 80,
+    graphicsStyle: 'fancy',
+    allowCracked: false,
+    graphicsQuality: 'high',
     cameraFov: 70,
     steeringSensitivity: 2,
   });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowSettingsModal(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Multiplayer room & connection state
   const [roomMode, setRoomMode] = useState<'menu' | 'host' | 'join'>('menu');
@@ -710,6 +725,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
   // Modals UI state
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+  const [menuInitialTab, setMenuInitialTab] = useState<'start' | 'how_to_play' | 'settings'>('start');
 
   const showCraftingRef = useRef<boolean>(false);
   useEffect(() => {
@@ -923,59 +939,52 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return mat;
   }, []);
 
+
   // Steve 3D Model Builder (feet positioned squarely at local y = 0.0)
-  const createSteveMesh = (colorHex = '#0ea5e9') => {
+  const createSteveMesh = () => {
     const steve = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ 
+      map: skinTextureRef.current || new THREE.Texture(), 
+      color: skinTextureRef.current ? 0xffffff : 0xcccccc,
+    });
+    const texW = 64; const texH = 32;
 
-    // 1. Legs (feet touch ground at local y = 0.0)
-    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
-    const legGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
-    legGeo.translate(0, -0.6, 0); // pivot at hip (y = 1.2), foot extends down to y = 0.0
+    // 1. Head
+    const headGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+    applyFaceUVs(headGeo, 4, 8, 8, 8, 8, texW, texH);
+    applyFaceUVs(headGeo, 5, 24, 8, 8, 8, texW, texH);
+    applyFaceUVs(headGeo, 0, 16, 8, 8, 8, texW, texH);
+    applyFaceUVs(headGeo, 1, 0, 8, 8, 8, texW, texH);
+    applyFaceUVs(headGeo, 2, 8, 0, 8, 8, texW, texH);
+    applyFaceUVs(headGeo, 3, 16, 0, 8, 8, texW, texH);
+    const head = new THREE.Mesh(headGeo, mat);
+    head.position.set(0, 2.8, 0); steve.add(head);
 
-    const legL = new THREE.Mesh(legGeo, pantsMat);
-    legL.position.set(-0.25, 1.2, 0);
-    steve.add(legL);
-    steveLegLRef.current = legL;
+    // 2. Torso
+    const torsoGeo = new THREE.BoxGeometry(0.8, 1.2, 0.4);
+    applyFaceUVs(torsoGeo, 4, 20, 20, 8, 12, texW, texH);
+    applyFaceUVs(torsoGeo, 5, 32, 20, 8, 12, texW, texH);
+    applyFaceUVs(torsoGeo, 0, 28, 20, 4, 12, texW, texH);
+    applyFaceUVs(torsoGeo, 1, 16, 20, 4, 12, texW, texH);
+    applyFaceUVs(torsoGeo, 2, 20, 16, 8, 4, texW, texH);
+    applyFaceUVs(torsoGeo, 3, 28, 16, 8, 4, texW, texH);
+    const torso = new THREE.Mesh(torsoGeo, mat);
+    torso.position.set(0, 1.8, 0); steve.add(torso);
 
-    const legR = new THREE.Mesh(legGeo, pantsMat);
-    legR.position.set(0.25, 1.2, 0);
-    steve.add(legR);
-    steveLegRRef.current = legR;
-
-    // 2. Torso (sits atop hips from y = 1.2 to y = 2.4, center at 1.8)
-    const torsoMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.7 });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.5), torsoMat);
-    torso.position.set(0, 1.8, 0);
-    steve.add(torso);
-
-    // 3. Arms (shoulders at y = 2.4, swing down to y = 1.2)
-    const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
-    const armGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
-    armGeo.translate(0, -0.6, 0);
-
-    const armL = new THREE.Mesh(armGeo, armMat);
-    armL.position.set(-0.65, 2.4, 0);
-    steve.add(armL);
-    steveArmLRef.current = armL;
-
-    const armR = new THREE.Mesh(armGeo, armMat);
-    armR.position.set(0.65, 2.4, 0);
-    steve.add(armR);
-    rightArmRef.current = armR;
-
-    // 4. Head (sits atop torso from y = 2.4 to y = 3.2, center at 2.8)
-    const headMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), headMat);
-    head.position.set(0, 2.8, 0);
-    steve.add(head);
-
-    // Hair
-    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.25, 0.85), new THREE.MeshStandardMaterial({ color: '#451a03' }));
-    hair.position.set(0, 3.12, 0);
-    steve.add(hair);
+    // 3. Arms/Legs
+    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), mat);
+    armL.position.set(-0.6, 1.8, 0); steve.add(armL); steveArmLRef.current = armL;
+    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), mat);
+    armR.position.set(0.6, 1.8, 0); steve.add(armR); rightArmRef.current = armR;
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), mat);
+    legL.position.set(-0.2, 0.6, 0); steve.add(legL); steveLegLRef.current = legL;
+    const legR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), mat);
+    legR.position.set(0.2, 0.6, 0); steve.add(legR); steveLegRRef.current = legR;
 
     return steve;
   };
+
+
 
   // Add a block to world
   const addBlock = useCallback((x: number, y: number, z: number, type: BlockType) => {
@@ -1054,112 +1063,111 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     removeBlockRef.current = removeBlock;
   }, [addBlock, removeBlock]);
 
+
+  const skinTextureRef = useRef<THREE.Texture | null>(null);
+
+  useEffect(() => {
+    const loader = new THREE.TextureLoader();
+    loader.load('/textures/skin.png', (texture) => {
+      texture.magFilter = THREE.NearestFilter;
+      texture.minFilter = THREE.NearestFilter;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.needsUpdate = true;
+      skinTextureRef.current = texture;
+      console.log('Skin texture loaded and configured');
+    });
+  }, []);
+
+  const applyFaceUVs = (geometry: THREE.BoxGeometry, faceIndex: number, x: number, y: number, w: number, h: number, texW: number, texH: number) => {
+    const uvs = geometry.attributes.uv;
+    const u0 = x / texW;
+    const u1 = (x + w) / texW;
+    const v0 = (texH - y - h) / texH;
+    const v1 = (texH - y) / texH;
+    
+    // Each face has 4 vertices. Order: [0,0], [1,0], [0,1], [1,1]
+    const base = faceIndex * 4;
+    uvs.setXY(base, u0, v1);
+    uvs.setXY(base + 1, u1, v1);
+    uvs.setXY(base + 2, u0, v0);
+    uvs.setXY(base + 3, u1, v0);
+    uvs.needsUpdate = true;
+  };
+
+
   // 3D Character Mesh Generator for remote players in the world
-  const createNetworkPlayerMesh = useCallback((name: string, colorHex: string, isHost: boolean) => {
+  const createNetworkPlayerMesh = useCallback((name: string, color: string, isHost: boolean) => {
     const group = new THREE.Group();
+    const mat = new THREE.MeshBasicMaterial({ map: skinTextureRef.current || new THREE.Texture() });
 
-    // 1. Legs (feet touch ground at local y = 0.0)
-    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
-    const legGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
-    legGeo.translate(0, -0.6, 0); // pivot at hip (y = 1.2), foot extends down to y = 0.0
+    const texW = 64;
+    const texH = 32;
 
-    const legL = new THREE.Mesh(legGeo, pantsMat);
-    legL.position.set(-0.25, 1.2, 0);
-    group.add(legL);
-
-    const legR = new THREE.Mesh(legGeo, pantsMat);
-    legR.position.set(0.25, 1.2, 0);
-    group.add(legR);
-
-    // 2. Torso (sits atop hips from y = 1.2 to y = 2.4, center at 1.8)
-    const torsoMat = new THREE.MeshStandardMaterial({ color: colorHex || '#10b981', roughness: 0.7 });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.5), torsoMat);
-    torso.position.set(0, 1.8, 0);
-    group.add(torso);
-
-    // 3. Left Arm (shoulders at y = 2.4, swing down to y = 1.2)
-    const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
-    const armLGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
-    armLGeo.translate(0, -0.6, 0);
-    const armL = new THREE.Mesh(armLGeo, armMat);
-    armL.position.set(-0.65, 2.4, 0);
-    group.add(armL);
-
-    // 4. Right Arm
-    const armRGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
-    armRGeo.translate(0, -0.6, 0);
-    const armR = new THREE.Mesh(armRGeo, armMat);
-    armR.position.set(0.65, 2.4, 0);
-    group.add(armR);
-
-    // Hand slot for held block
-    const handSlot = new THREE.Group();
-    handSlot.position.set(0, -0.9, -0.15);
-    armR.add(handSlot);
-
-    // 5. Head (sits atop torso from y = 2.4 to y = 3.2, center at 2.8)
-    const headMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), headMat);
+    // 1. Head
+    const headGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+    applyFaceUVs(headGeo, 4, 8, 8, 8, 8, texW, texH); // Front
+    applyFaceUVs(headGeo, 5, 24, 8, 8, 8, texW, texH); // Back
+    applyFaceUVs(headGeo, 0, 16, 8, 8, 8, texW, texH); // Right
+    applyFaceUVs(headGeo, 1, 0, 8, 8, 8, texW, texH);  // Left
+    applyFaceUVs(headGeo, 2, 8, 0, 8, 8, texW, texH);  // Top
+    applyFaceUVs(headGeo, 3, 16, 0, 8, 8, texW, texH); // Bottom
+    const head = new THREE.Mesh(headGeo, mat);
     head.position.set(0, 2.8, 0);
     group.add(head);
 
-    // Hair
-    const hairMat = new THREE.MeshStandardMaterial({ color: '#451a03' });
-    const hair = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.25, 0.85), hairMat);
-    hair.position.set(0, 3.12, 0);
-    group.add(hair);
+    // 2. Torso
+    const torsoGeo = new THREE.BoxGeometry(0.8, 1.2, 0.4);
+    applyFaceUVs(torsoGeo, 4, 20, 20, 8, 12, texW, texH); // Front
+    applyFaceUVs(torsoGeo, 5, 32, 20, 8, 12, texW, texH); // Back
+    applyFaceUVs(torsoGeo, 0, 28, 20, 4, 12, texW, texH); // Right
+    applyFaceUVs(torsoGeo, 1, 16, 20, 4, 12, texW, texH); // Left
+    applyFaceUVs(torsoGeo, 2, 20, 16, 8, 4, texW, texH);  // Top
+    applyFaceUVs(torsoGeo, 3, 28, 16, 8, 4, texW, texH); // Bottom
+    const torso = new THREE.Mesh(torsoGeo, mat);
+    torso.position.set(0, 1.8, 0);
+    group.add(torso);
 
-    // 6. 3D Billboard Name Tag
+    // 3. Arms/Legs (simplified UVs)
+    const armL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), mat);
+    armL.position.set(-0.6, 1.8, 0);
+    group.add(armL);
+    const armR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), mat);
+    armR.position.set(0.6, 1.8, 0);
+    group.add(armR);
+
+    const handSlot = new THREE.Group();
+    handSlot.position.set(0, -0.5, 0.4);
+    armR.add(handSlot);
+
+    const legL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), mat);
+    legL.position.set(-0.2, 0.6, 0);
+    group.add(legL);
+    const legR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.2, 0.4), mat);
+    legR.position.set(0.2, 0.6, 0);
+    group.add(legR);
+
+    // 4. Name Tag & Collider
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
+    canvas.width = 256; canvas.height = 64;
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.fillStyle = 'rgba(15, 23, 42, 0.8)';
-      ctx.beginPath();
-      ctx.roundRect(8, 8, 240, 48, 8);
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = isHost ? '#fbbf24' : '#38bdf8';
-      ctx.stroke();
-
+      ctx.beginPath(); ctx.roundRect(8, 8, 240, 48, 8); ctx.fill();
       ctx.fillStyle = isHost ? '#fef08a' : '#ffffff';
-      ctx.font = 'bold 22px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 22px sans-serif'; ctx.textAlign = 'center';
       ctx.fillText((isHost ? '👑 ' : '') + name.slice(0, 15), 128, 32);
     }
-    const nameTex = new THREE.CanvasTexture(canvas);
-    const spriteMat = new THREE.SpriteMaterial({ map: nameTex, depthTest: false });
-    const sprite = new THREE.Sprite(spriteMat);
-    sprite.scale.set(2.4, 0.6, 1);
-    sprite.position.set(0, 3.6, 0);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas), depthTest: false }));
+    sprite.scale.set(2.4, 0.6, 1); sprite.position.set(0, 3.6, 0);
     group.add(sprite);
 
-    // 7. Raycast Hitbox Collider for PVP (covers feet to top of head: 0.0 to 3.2)
-    const colliderGeo = new THREE.BoxGeometry(1.0, 2.8, 0.8);
-    const colliderMat = new THREE.MeshBasicMaterial({ visible: false, wireframe: false });
-    const collider = new THREE.Mesh(colliderGeo, colliderMat);
+    const collider = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.8, 0.8), new THREE.MeshBasicMaterial({ visible: false }));
     collider.position.set(0, 1.4, 0);
     group.add(collider);
 
-    return {
-      group,
-      collider,
-      head,
-      torso,
-      armL,
-      armR,
-      legL,
-      legR,
-      handSlot,
-      origColors: {
-        head: '#fcd34d',
-        torso: colorHex || '#10b981',
-        arms: '#fcd34d',
-        legs: '#1e3a8a',
-      },
-    };
+    const origColors = { head: color, torso: color, arms: color, legs: color };
+
+    return { group, collider, head, torso, armL, armR, legL, legR, handSlot, origColors };
   }, []);
 
   // Add or update remote player in scene
@@ -2645,8 +2653,11 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                     <span>{isFullscreen ? 'Normal' : 'Tam Ekran'}</span>
                   </button>
                   <button
-                    onClick={() => setIsMenuOpen(true)}
-                    className="flex-1 py-2 bg-[#333333] hover:bg-[#444444] text-[#e0e0e0] hover:text-white border-2 border-t-[#666666] border-l-[#666666] border-b-[#111111] border-r-[#111111] font-arcade text-[10px] tracking-wide shadow-md rounded-none"
+                    onClick={() => {
+                      setMenuInitialTab('settings');
+                      setIsMenuOpen(true);
+                    }}
+                    className="flex-1 py-2 bg-[#333333] hover:bg-[#444444] text-[#e0e0e0] hover:text-white border-2 border-t-[#666666] border-l-[#666666] border-b-[#111111] border-r-[#111111] font-arcade text-[10px] tracking-wide shadow-md rounded-none cursor-pointer"
                   >
                     Seçenekler
                   </button>
@@ -3167,8 +3178,11 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
                 <div className="grid grid-cols-2 gap-2">
                   <button
-                    onClick={() => setIsMenuOpen(true)}
-                    className="py-2 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-[10px] tracking-wide shadow-md rounded-none"
+                    onClick={() => {
+                      setMenuInitialTab('settings');
+                      setIsMenuOpen(true);
+                    }}
+                    className="py-2 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-[10px] tracking-wide shadow-md rounded-none cursor-pointer"
                   >
                     Seçenekler
                   </button>
@@ -3194,12 +3208,15 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
                 <button
                   onClick={() => {
-                    if (confirm("Lobiye geri dönmek istiyor musunuz? İlerlemeniz kaydedilecektir.")) {
+                    if (confirm("Ana ekrana dönmek istiyor musunuz? Sunucu bağlantısı sonlandırılacaktır.")) {
+                      multiplayerManager.leaveRoom();
+                      setIsMultiplayerActive(false);
                       setGameStarted(false);
                       setIsPaused(false);
+                      setRoomMode('menu');
                     }
                   }}
-                  className="w-full py-2.5 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-xs tracking-wider shadow-md rounded-none"
+                  className="w-full py-2.5 bg-[#9333ea] hover:bg-[#a855f7] text-[#f3e8ff] hover:text-[#ffffa0] border-2 border-t-[#d8b4fe] border-l-[#d8b4fe] border-b-[#581c87] border-r-[#581c87] font-arcade text-xs tracking-wider shadow-md rounded-none cursor-pointer"
                 >
                   Sunucudan Ayrıl
                 </button>
@@ -3336,13 +3353,24 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         onPlayerColorChange={setPlayerColor}
         settings={settings}
         onSettingsChange={setSettings}
+        initialTab={menuInitialTab}
         onStartGame={() => {
           setIsMenuOpen(false);
           sound.playBonus();
         }}
       />
 
+      {/* In-game Settings Panel */}
+      {showSettingsModal && (
+        <SettingsPanel
+          settings={settings}
+          onSettingsChange={setSettings}
+          onClose={() => setShowSettingsModal(false)}
+        />
+      )}
+
       {/* Invite Modal removed */}
+
     </div>
   );
 };

@@ -71,6 +71,8 @@ function getRoomBlockMap(room: string) {
 const minecraftWorldBlocks = getRoomBlockMap('minecraft');
 
 app.use(express.json());
+app.use('/textures', express.static(path.resolve('public/textures')));
+app.use('/public', express.static(path.resolve('public')));
 
 function getRoomStats() {
   return {

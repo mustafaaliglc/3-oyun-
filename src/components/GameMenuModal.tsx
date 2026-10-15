@@ -27,6 +27,7 @@ interface GameMenuModalProps {
   settings: GameSettings;
   onSettingsChange: (settings: GameSettings) => void;
   onStartGame: () => void;
+  initialTab?: 'start' | 'how_to_play' | 'settings';
 }
 
 export const GameMenuModal: React.FC<GameMenuModalProps> = ({
@@ -40,8 +41,15 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
   settings,
   onSettingsChange,
   onStartGame,
+  initialTab = 'start',
 }) => {
-  const [activeTab, setActiveTab] = useState<'start' | 'how_to_play' | 'settings'>('start');
+  const [activeTab, setActiveTab] = useState<'start' | 'how_to_play' | 'settings'>(initialTab);
+
+  React.useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   if (!isOpen) return null;
 
@@ -264,88 +272,50 @@ export const GameMenuModal: React.FC<GameMenuModalProps> = ({
           {/* TAB 3: AYARLAR */}
           {activeTab === 'settings' && (
             <div className="space-y-4">
-              {/* Graphics Quality */}
-              <div className="bg-slate-950/80 rounded-xl p-3.5 border border-slate-800">
-                <label className="text-xs text-slate-400 font-bold mb-2 block">
-                  Grafik Kalitesi:
-                </label>
+              <div className="bg-slate-800 rounded-sm p-3.5 border-2 border-slate-700">
+                <label className="text-xs text-slate-300 font-bold mb-2 block uppercase tracking-wider">Görüş Mesafesi:</label>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['high', 'medium', 'low'] as const).map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => onSettingsChange({ ...settings, graphicsQuality: q })}
-                      className={`py-2 px-3 rounded-lg text-xs font-bold transition-all ${
-                        settings.graphicsQuality === q
-                          ? 'bg-pink-600 text-white shadow-md'
-                          : 'bg-slate-900 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {q === 'high' ? 'Yüksek (PBR)' : q === 'medium' ? 'Dengeli' : 'Performans'}
+                  {[4, 8, 12].map((d) => (
+                    <button key={d} onClick={() => onSettingsChange({ ...settings, renderDistance: d })}
+                      className={`py-2 rounded-sm text-xs font-bold border-2 ${settings.renderDistance === d ? 'bg-green-700 border-green-500 text-white' : 'bg-slate-900 border-slate-600 text-slate-400'}`}>
+                      {d === 4 ? 'Tiny' : d === 8 ? 'Short' : 'Normal'}
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* Sound Volume */}
-              <div className="bg-slate-950/80 rounded-xl p-3.5 border border-slate-800">
-                <div className="flex items-center justify-between text-xs text-slate-400 font-bold mb-2">
-                  <span className="flex items-center gap-1.5">
-                    <Volume2 className="w-4 h-4 text-pink-400" />
-                    Ses Düzeyi:
-                  </span>
-                  <span className="text-white font-mono">{settings.soundVolume}%</span>
+              <div className="bg-slate-800 rounded-sm p-3.5 border-2 border-slate-700">
+                <div className="flex justify-between text-xs font-bold text-slate-300 mb-2 uppercase tracking-wider">
+                  <span>Hassasiyet:</span>
+                  <span className="text-white">{settings.mouseSensitivity}x</span>
                 </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={settings.soundVolume}
-                  onChange={(e) =>
-                    onSettingsChange({ ...settings, soundVolume: Number(e.target.value) })
-                  }
-                  className="w-full accent-pink-500 cursor-pointer"
-                />
+                <input type="range" min="0.5" max="3.0" step="0.1" value={settings.mouseSensitivity}
+                  onChange={(e) => onSettingsChange({ ...settings, mouseSensitivity: parseFloat(e.target.value) })}
+                  className="w-full h-4 bg-slate-900 accent-green-600 border-2 border-slate-600" />
               </div>
-
-              {/* Steering Sensitivity */}
-              <div className="bg-slate-950/80 rounded-xl p-3.5 border border-slate-800">
-                <div className="flex items-center justify-between text-xs text-slate-400 font-bold mb-2">
-                  <span className="flex items-center gap-1.5">
-                    <Sliders className="w-4 h-4 text-cyan-400" />
-                    Direksiyon Hassasiyeti:
-                  </span>
-                  <span className="text-white font-mono">
-                    {settings.steeringSensitivity === 1
-                      ? 'Düşük'
-                      : settings.steeringSensitivity === 2
-                      ? 'Normal'
-                      : 'Hızlı'}
-                  </span>
+              <div className="bg-slate-800 rounded-sm p-3.5 border-2 border-slate-700">
+                <div className="flex justify-between text-xs font-bold text-slate-300 mb-2 uppercase tracking-wider">
+                  <span>Ses Düzeyi:</span>
+                  <span className="text-white">{settings.soundVolume}%</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {[1, 2, 3].map((val) => (
-                    <button
-                      key={val}
-                      onClick={() =>
-                        onSettingsChange({ ...settings, steeringSensitivity: val })
-                      }
-                      className={`py-2 px-3 rounded-lg text-xs font-bold transition-all ${
-                        settings.steeringSensitivity === val
-                          ? 'bg-cyan-600 text-white shadow-md'
-                          : 'bg-slate-900 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {val === 1 ? 'Düşük' : val === 2 ? 'Normal' : 'Yüksek'}
-                    </button>
-                  ))}
-                </div>
+                <input type="range" min="0" max="100" value={settings.soundVolume}
+                  onChange={(e) => onSettingsChange({ ...settings, soundVolume: parseInt(e.target.value) })}
+                  className="w-full h-4 bg-slate-900 accent-green-600 border-2 border-slate-600" />
               </div>
-
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => onSettingsChange({ ...settings, graphicsStyle: settings.graphicsStyle === 'fast' ? 'fancy' : 'fast' })}
+                  className={`py-3 rounded-sm text-xs font-bold border-2 ${settings.graphicsStyle === 'fancy' ? 'bg-green-700 border-green-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
+                  Grafik: {settings.graphicsStyle.toUpperCase()}
+                </button>
+                <button onClick={() => onSettingsChange({ ...settings, allowCracked: !settings.allowCracked })}
+                  className={`py-3 rounded-sm text-xs font-bold border-2 ${settings.allowCracked ? 'bg-green-700 border-green-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-300'}`}>
+                  Cracked: {settings.allowCracked ? 'ON' : 'OFF'}
+                </button>
+              </div>
               <button
                 onClick={onClose}
-                className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl transition-colors mt-2"
+                className="w-full py-2.5 bg-slate-700 hover:bg-slate-600 border-2 border-slate-600 text-white text-xs font-bold rounded-sm transition-colors mt-2"
               >
-                Ayarları Kaydet ve Kapat
+                Kaydet ve Kapat
               </button>
             </div>
           )}

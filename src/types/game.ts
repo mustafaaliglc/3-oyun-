@@ -69,8 +69,12 @@ export interface ChatMessage {
 }
 
 export interface GameSettings {
+  renderDistance: number; // 4, 8, 12
+  mouseSensitivity: number; // 0.5 - 3.0
+  soundVolume: number; // 0 - 100
+  graphicsStyle: 'fast' | 'fancy';
+  allowCracked: boolean;
   graphicsQuality: 'high' | 'medium' | 'low';
-  soundVolume: number;
   cameraFov: number;
   steeringSensitivity: number;
 }
