@@ -923,59 +923,56 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return mat;
   }, []);
 
-  // Steve 3D Model Builder (for 3rd person local player)
+  // Steve 3D Model Builder (feet positioned squarely at local y = 0.0)
   const createSteveMesh = (colorHex = '#0ea5e9') => {
     const steve = new THREE.Group();
 
-    // Head
+    // 1. Legs (feet touch ground at local y = 0.0)
+    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
+    const legGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
+    legGeo.translate(0, -0.6, 0); // pivot at hip (y = 1.2), foot extends down to y = 0.0
+
+    const legL = new THREE.Mesh(legGeo, pantsMat);
+    legL.position.set(-0.25, 1.2, 0);
+    steve.add(legL);
+    steveLegLRef.current = legL;
+
+    const legR = new THREE.Mesh(legGeo, pantsMat);
+    legR.position.set(0.25, 1.2, 0);
+    steve.add(legR);
+    steveLegRRef.current = legR;
+
+    // 2. Torso (sits atop hips from y = 1.2 to y = 2.4, center at 1.8)
+    const torsoMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.7 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.5), torsoMat);
+    torso.position.set(0, 1.8, 0);
+    steve.add(torso);
+
+    // 3. Arms (shoulders at y = 2.4, swing down to y = 1.2)
+    const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
+    const armGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+    armGeo.translate(0, -0.6, 0);
+
+    const armL = new THREE.Mesh(armGeo, armMat);
+    armL.position.set(-0.65, 2.4, 0);
+    steve.add(armL);
+    steveArmLRef.current = armL;
+
+    const armR = new THREE.Mesh(armGeo, armMat);
+    armR.position.set(0.65, 2.4, 0);
+    steve.add(armR);
+    rightArmRef.current = armR;
+
+    // 4. Head (sits atop torso from y = 2.4 to y = 3.2, center at 2.8)
     const headMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), headMat);
-    head.position.y = 2.4;
+    head.position.set(0, 2.8, 0);
     steve.add(head);
 
     // Hair
     const hair = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.25, 0.85), new THREE.MeshStandardMaterial({ color: '#451a03' }));
-    hair.position.set(0, 2.72, 0);
+    hair.position.set(0, 3.12, 0);
     steve.add(hair);
-
-    // Torso (Cyan shirt)
-    const torsoMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.7 });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.5), torsoMat);
-    torso.position.y = 1.4;
-    steve.add(torso);
-
-    // Left Arm (with translated shoulder pivot)
-    const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
-    const armLGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
-    armLGeo.translate(0, -0.4, 0);
-    const armL = new THREE.Mesh(armLGeo, armMat);
-    armL.position.set(-0.65, 1.8, 0);
-    steve.add(armL);
-    steveArmLRef.current = armL;
-
-    // Right Arm (Unique mesh with translated shoulder pivot)
-    const armRGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
-    armRGeo.translate(0, -0.4, 0); // Translate geometry down to move pivot to shoulder
-    const armR = new THREE.Mesh(armRGeo, armMat);
-    armR.position.set(0.65, 1.8, 0); // Position at shoulder height
-    steve.add(armR);
-    rightArmRef.current = armR; // Save ref for held item attachment
-
-    // Blue Pants & Legs (with translated hip pivots)
-    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
-    const legLGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
-    legLGeo.translate(0, -0.5, 0);
-    const legL = new THREE.Mesh(legLGeo, pantsMat);
-    legL.position.set(-0.25, 0.8, 0);
-    steve.add(legL);
-    steveLegLRef.current = legL;
-
-    const legRGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
-    legRGeo.translate(0, -0.5, 0);
-    const legR = new THREE.Mesh(legRGeo, pantsMat);
-    legR.position.set(0.25, 0.8, 0);
-    steve.add(legR);
-    steveLegRRef.current = legR;
 
     return steve;
   };
@@ -1015,6 +1012,42 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return record.type;
   }, []);
 
+  // Precision ground height detector: measures the exact top face of solid blocks under a footprint
+  const getGroundHeightAt = useCallback((x: number, z: number, currentFeetY: number): number => {
+    // 5-point footprint sampling (center + 4 cardinal corners with 0.26 radius)
+    const footprintRadius = 0.26;
+    const samplePoints: [number, number][] = [
+      [0, 0],
+      [footprintRadius, 0],
+      [-footprintRadius, 0],
+      [0, footprintRadius],
+      [0, -footprintRadius],
+    ];
+
+    let maxGroundY = -30;
+    // Search downwards starting from just above the feet
+    const startY = Math.min(30, Math.floor(currentFeetY + 0.6));
+
+    for (const [ox, oz] of samplePoints) {
+      const sx = Math.round(x + ox);
+      const sz = Math.round(z + oz);
+
+      for (let y = startY; y >= -15; y--) {
+        const key = `${sx},${y},${sz}`;
+        if (worldBlocksRef.current.has(key)) {
+          const topFaceY = y + 0.5; // Top face of a 1x1x1 cube centered at integer y
+          if (topFaceY <= currentFeetY + 0.55 && topFaceY > maxGroundY) {
+            maxGroundY = topFaceY;
+          }
+          break; // Found highest solid block for this footprint sample
+        }
+      }
+    }
+
+    // Default safe bedrock floor if nothing found underneath
+    return maxGroundY === -30 ? -5.5 : maxGroundY;
+  }, []);
+
   // Keep stable refs updated
   useEffect(() => {
     addBlockRef.current = addBlock;
@@ -1025,56 +1058,56 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const createNetworkPlayerMesh = useCallback((name: string, colorHex: string, isHost: boolean) => {
     const group = new THREE.Group();
 
-    // 1. Head
+    // 1. Legs (feet touch ground at local y = 0.0)
+    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
+    const legGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
+    legGeo.translate(0, -0.6, 0); // pivot at hip (y = 1.2), foot extends down to y = 0.0
+
+    const legL = new THREE.Mesh(legGeo, pantsMat);
+    legL.position.set(-0.25, 1.2, 0);
+    group.add(legL);
+
+    const legR = new THREE.Mesh(legGeo, pantsMat);
+    legR.position.set(0.25, 1.2, 0);
+    group.add(legR);
+
+    // 2. Torso (sits atop hips from y = 1.2 to y = 2.4, center at 1.8)
+    const torsoMat = new THREE.MeshStandardMaterial({ color: colorHex || '#10b981', roughness: 0.7 });
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.5), torsoMat);
+    torso.position.set(0, 1.8, 0);
+    group.add(torso);
+
+    // 3. Left Arm (shoulders at y = 2.4, swing down to y = 1.2)
+    const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
+    const armLGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+    armLGeo.translate(0, -0.6, 0);
+    const armL = new THREE.Mesh(armLGeo, armMat);
+    armL.position.set(-0.65, 2.4, 0);
+    group.add(armL);
+
+    // 4. Right Arm
+    const armRGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
+    armRGeo.translate(0, -0.6, 0);
+    const armR = new THREE.Mesh(armRGeo, armMat);
+    armR.position.set(0.65, 2.4, 0);
+    group.add(armR);
+
+    // Hand slot for held block
+    const handSlot = new THREE.Group();
+    handSlot.position.set(0, -0.9, -0.15);
+    armR.add(handSlot);
+
+    // 5. Head (sits atop torso from y = 2.4 to y = 3.2, center at 2.8)
     const headMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), headMat);
-    head.position.y = 2.4;
+    head.position.set(0, 2.8, 0);
     group.add(head);
 
     // Hair
     const hairMat = new THREE.MeshStandardMaterial({ color: '#451a03' });
     const hair = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.25, 0.85), hairMat);
-    hair.position.set(0, 2.72, 0);
+    hair.position.set(0, 3.12, 0);
     group.add(hair);
-
-    // 2. Torso
-    const torsoMat = new THREE.MeshStandardMaterial({ color: colorHex || '#10b981', roughness: 0.7 });
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.5), torsoMat);
-    torso.position.y = 1.4;
-    group.add(torso);
-
-    // 3. Left Arm
-    const armMat = new THREE.MeshStandardMaterial({ color: '#fcd34d', roughness: 0.8 });
-    const armLGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
-    armLGeo.translate(0, -0.4, 0);
-    const armL = new THREE.Mesh(armLGeo, armMat);
-    armL.position.set(-0.65, 1.8, 0);
-    group.add(armL);
-
-    // 4. Right Arm
-    const armRGeo = new THREE.BoxGeometry(0.35, 1.2, 0.35);
-    armRGeo.translate(0, -0.4, 0);
-    const armR = new THREE.Mesh(armRGeo, armMat);
-    armR.position.set(0.65, 1.8, 0);
-    group.add(armR);
-
-    // Hand slot for held block
-    const handSlot = new THREE.Group();
-    handSlot.position.set(0, -0.65, -0.15);
-    armR.add(handSlot);
-
-    // 5. Legs
-    const pantsMat = new THREE.MeshStandardMaterial({ color: '#1e3a8a', roughness: 0.8 });
-    const legGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
-    legGeo.translate(0, -0.5, 0);
-
-    const legL = new THREE.Mesh(legGeo, pantsMat);
-    legL.position.set(-0.25, 0.8, 0);
-    group.add(legL);
-
-    const legR = new THREE.Mesh(legGeo, pantsMat);
-    legR.position.set(0.25, 0.8, 0);
-    group.add(legR);
 
     // 6. 3D Billboard Name Tag
     const canvas = document.createElement('canvas');
@@ -1100,14 +1133,14 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     const spriteMat = new THREE.SpriteMaterial({ map: nameTex, depthTest: false });
     const sprite = new THREE.Sprite(spriteMat);
     sprite.scale.set(2.4, 0.6, 1);
-    sprite.position.y = 3.3;
+    sprite.position.set(0, 3.6, 0);
     group.add(sprite);
 
-    // 7. Raycast Hitbox Collider for PVP (covers the full bounding volume of the player)
-    const colliderGeo = new THREE.BoxGeometry(1.0, 2.4, 0.8);
+    // 7. Raycast Hitbox Collider for PVP (covers feet to top of head: 0.0 to 3.2)
+    const colliderGeo = new THREE.BoxGeometry(1.0, 2.8, 0.8);
     const colliderMat = new THREE.MeshBasicMaterial({ visible: false, wireframe: false });
     const collider = new THREE.Mesh(colliderGeo, colliderMat);
-    collider.position.y = 1.3;
+    collider.position.set(0, 1.4, 0);
     group.add(collider);
 
     return {
@@ -1595,7 +1628,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       let spawnY = 8;
       for (let y = 20; y >= -10; y--) {
         if (worldBlocksRef.current.has(`0,${y},0`)) {
-          spawnY = y + 1.5;
+          spawnY = y + 0.5; // Exactly at the top surface of the grass block
           break;
         }
       }
@@ -2140,18 +2173,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         }
 
         // Snap cow perfectly on top of physical terrain
-        const cx = Math.round(mob.x);
-        const cz = Math.round(mob.z);
-        let groundHeight = -10;
-        for (let y = 20; y >= -10; y--) {
-          const key = `${cx},${y},${cz}`;
-          if (worldBlocksRef.current.has(key)) {
-            groundHeight = y + 1.0;
-            break;
-          }
-        }
-        mob.y = THREE.MathUtils.lerp(mob.y, groundHeight, 0.2); // smooth vertical leveling
-        mob.mesh.position.set(mob.x, mob.y - 0.5, mob.z);
+        const cowGround = getGroundHeightAt(mob.x, mob.z, mob.y);
+        mob.y = THREE.MathUtils.lerp(mob.y, cowGround, 0.25);
+        mob.mesh.position.set(mob.x, mob.y, mob.z);
 
         // swing legs
         if (isWalking) {
@@ -2231,37 +2255,21 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         };
 
         // Check collision at player's foot and head height
-        const feetY = Math.round(pos.y - 1);
-        const headY = Math.round(pos.y);
+        const feetBlockY = Math.round(pos.y);
+        const headBlockY = Math.round(pos.y + 1.5);
 
-        const collidesX = isSolid(nextX, feetY, pos.z) || isSolid(nextX, headY, pos.z);
-        const collidesZ = isSolid(pos.x, feetY, nextZ) || isSolid(pos.x, headY, nextZ);
+        const collidesX = isSolid(nextX, feetBlockY, pos.z) || isSolid(nextX, headBlockY, pos.z);
+        const collidesZ = isSolid(pos.x, feetBlockY, nextZ) || isSolid(pos.x, headBlockY, nextZ);
 
         if (!collidesX) pos.x = nextX;
         if (!collidesZ) pos.z = nextZ;
       }
 
       // Voxel Ground Collision & Gravity
-      const footBlockX = Math.round(pos.x);
-      const footBlockZ = Math.round(pos.z);
-      let groundY = -30;
+      const groundY = getGroundHeightAt(pos.x, pos.z, pos.y);
 
-      // Find highest solid block below or around player feet
-      for (let y = Math.min(20, Math.floor(pos.y + 1)); y >= -15; y--) {
-        const key = `${footBlockX},${y},${footBlockZ}`;
-        if (worldBlocksRef.current.has(key)) {
-          groundY = y + 1.5; // stand on top of block
-          break;
-        }
-      }
-
-      // Fallback if no block found directly under foot
-      if (groundY === -30) {
-        groundY = -5; // Default safe floor
-      }
-
-      // Jump
-      if (keys.space && !pos.isJumping && pos.y <= groundY + 0.1) {
+      // Jump (only allow if standing firmly on ground)
+      if (keys.space && !pos.isJumping && pos.y <= groundY + 0.08) {
         pos.isJumping = true;
         pos.vy = 8.5;
         sound.playTone(400, 'triangle', 0.08, 0.15);
@@ -2269,8 +2277,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
       // Apply vertical velocity & gravity
       pos.y += pos.vy * dt;
-      pos.vy -= 22 * dt; // gravity
+      pos.vy -= 24 * dt; // gravity
 
+      // Solid ground contact collision: prevent falling below ground
       if (pos.y <= groundY) {
         pos.y = groundY;
         pos.isJumping = false;
@@ -2305,9 +2314,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         }
       }
 
-      // Update Steve Model (visible in third person)
+      // Update Steve Model (visible in third person, feet rest squarely at pos.y)
       if (steve) {
-        steve.position.set(pos.x, pos.y - 1.5, pos.z);
+        steve.position.set(pos.x, pos.y, pos.z);
         steve.rotation.y = pos.yaw;
         steve.visible = cameraView === 'third';
       }
@@ -2375,22 +2384,49 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         camera.rotation.x = pos.pitch;
 
         if (cameraView === 'first') {
-          camera.position.set(pos.x, pos.y + 0.2, pos.z);
+          // Eye level is 1.62 blocks above the feet
+          camera.position.set(pos.x, pos.y + 1.62, pos.z);
         } else {
           // Third-person chase camera behind Steve
           const dist = 3.8;
           const camX = pos.x + Math.sin(pos.yaw) * dist;
           const camZ = pos.z + Math.cos(pos.yaw) * dist;
-          camera.position.set(camX, pos.y + 1.2, camZ);
+          camera.position.set(camX, pos.y + 1.8, camZ);
         }
       }
 
       // 8. Remote multiplayer players lerp interpolation and animation
       remotePlayersRef.current.forEach((rp) => {
-        // Smooth position lerp
-        rp.group.position.x += (rp.targetX - rp.group.position.x) * 0.25;
-        rp.group.position.y += (rp.targetY - rp.group.position.y) * 0.25;
-        rp.group.position.z += (rp.targetZ - rp.group.position.z) * 0.25;
+        // 1. Smooth horizontal position lerp
+        rp.group.position.x += (rp.targetX - rp.group.position.x) * 0.28;
+        rp.group.position.z += (rp.targetZ - rp.group.position.z) * 0.28;
+
+        // 2. Continuous Gravity & Ground Collision for Remote Players
+        // Measure the solid ground height right beneath the remote player's current X, Z coordinates
+        const rpGroundY = getGroundHeightAt(
+          rp.group.position.x,
+          rp.group.position.z,
+          Math.max(rp.group.position.y, rp.targetY)
+        );
+
+        // Detect if remote player is actively in mid-air (jumping or free-falling)
+        const isAirborne = rp.targetY > rpGroundY + 0.12;
+
+        if (isAirborne) {
+          // Smoothly interpolate vertical position during jumps/falls
+          rp.group.position.y += (rp.targetY - rp.group.position.y) * 0.32;
+          // Physics clamp: cannot fall through solid ground below them
+          if (rp.group.position.y < rpGroundY) {
+            rp.group.position.y = rpGroundY;
+          }
+        } else {
+          // Grounded: smoothly snap feet directly to the top face of the ground blocks
+          // This ensures characters stand firmly on the ground with ZERO hovering!
+          rp.group.position.y = THREE.MathUtils.lerp(rp.group.position.y, rpGroundY, 0.35);
+          if (Math.abs(rp.group.position.y - rpGroundY) < 0.015) {
+            rp.group.position.y = rpGroundY;
+          }
+        }
 
         // Smooth rotation lerp
         let diffYaw = rp.targetYaw - rp.group.rotation.y;

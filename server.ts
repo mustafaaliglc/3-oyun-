@@ -561,7 +561,8 @@ wss.on('connection', (ws: WebSocket) => {
 // Mount Vite or serve static files
 async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production';
-  const PORT = process.env.PORT || 3000;
+  // Dev server must run on port 3000 as per AI Studio runtime environment requirements
+  const PORT = 3000;
 
   if (!isProduction) {
     const { createServer: createViteServer } = await import('vite');
