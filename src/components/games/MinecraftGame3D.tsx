@@ -536,6 +536,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const [inventory, setInventory] = useState<Record<BlockType, number>>(inventoryRef.current);
   const [draggedItem, setDraggedItem] = useState<BlockType | null>(null);
   const [showCrafting, setShowCrafting] = useState<boolean>(false);
+  const [craftingGrid, setCraftingGrid] = useState<(BlockType | null)[]>([null, null, null, null]);
   const [score, setScore] = useState<number>(0);
   const [blocksMined, setBlocksMined] = useState<number>(0);
   const [blocksPlaced, setBlocksPlaced] = useState<number>(0);
@@ -708,6 +709,51 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       sound.playBonus();
     }
   }, []);
+
+  const getCraftingResult = useCallback((): { result: BlockType; count: number } | null => {
+    const counts: Partial<Record<BlockType, number>> = {};
+    let totalItems = 0;
+    for (const item of craftingGrid) {
+      if (item) {
+        counts[item] = (counts[item] || 0) + 1;
+        totalItems++;
+      }
+    }
+    if (counts['wood'] === 4) return { result: 'tnt', count: 1 };
+    if (counts['stone'] === 2 && totalItems === 2) return { result: 'brick', count: 1 };
+    if (counts['wood'] === 2 && totalItems === 2) return { result: 'glass', count: 1 };
+    if (counts['dirt'] === 2 && totalItems === 2) return { result: 'grass', count: 1 };
+    if (counts['diamond'] === 1 && counts['stone'] === 2 && totalItems === 3) return { result: 'diamond', count: 2 };
+    if (counts['birch'] === 2 && totalItems === 2) return { result: 'wood', count: 1 };
+    return null;
+  }, [craftingGrid]);
+
+  const executeCrafting = useCallback(() => {
+    const recipe = getCraftingResult();
+    if (!recipe) return;
+
+    for (const item of craftingGrid) {
+      if (item) {
+        removeFromInventory(item);
+      }
+    }
+    setCraftingGrid([null, null, null, null]);
+
+    for (let i = 0; i < recipe.count; i++) {
+      addToInventory(recipe.result);
+    }
+    sound.playBonus();
+  }, [craftingGrid, getCraftingResult, removeFromInventory, addToInventory]);
+
+  const eatBeef = useCallback(() => {
+    const beefCount = inventoryRef.current['beef'] || 0;
+    if (beefCount > 0 && (hunger < 20 || health < 20)) {
+      removeFromInventory('beef');
+      setHunger((prev) => Math.min(20, prev + 6));
+      setHealth((prev) => Math.min(20, prev + 4));
+      sound.playBonus();
+    }
+  }, [hunger, health, removeFromInventory]);
 
   // Real-time Hunger & Starvation loop
   useEffect(() => {
@@ -3112,7 +3158,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
           {/* Classic Minecraft Survival Inventory & Crafting Panel */}
           {showCrafting && (
             <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-[#c6c6c6] border-4 border-t-white border-l-white border-b-[#555] border-r-[#555] p-5 w-full max-w-[440px] shadow-2xl rounded-none text-slate-800 select-none flex flex-col gap-4 relative font-mono text-xs">
+              <div className="bg-[#c6c6c6] border-4 border-t-white border-l-white border-b-[#555] border-r-[#555] p-5 w-full max-w-[460px] shadow-2xl rounded-none text-slate-800 select-none flex flex-col gap-3 relative font-mono text-xs">
                 
                 {/* Close Button x */}
                 <button 
@@ -3122,8 +3168,20 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                   X
                 </button>
 
+                <div className="flex justify-between items-center border-b border-slate-400 pb-1">
+                  <span className="font-arcade text-xs text-slate-800 font-bold">ÜRETİM & ENVANTER (CRAFTING)</span>
+                  {inventory['beef'] > 0 && (
+                    <button
+                      onClick={eatBeef}
+                      className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white font-arcade text-[8px] border border-amber-800 shadow cursor-pointer flex items-center gap-1"
+                    >
+                      🥩 ET YE ({inventory['beef']}) (+6 Açlık)
+                    </button>
+                  )}
+                </div>
+
                 {/* Top Section: Armor, Preview, Crafting 2x2 */}
-                <div className="flex gap-4 items-start justify-between">
+                <div className="flex gap-4 items-center justify-between">
                   {/* Left: Armor slots (4 square vertical slots) */}
                   <div className="flex flex-col gap-1.5">
                     {['helmet', 'chestplate', 'leggings', 'boots'].map((slot) => (
@@ -3136,36 +3194,57 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                     ))}
                   </div>
 
-                  {/* Center: Steve 2D Preview (black rectangle) */}
-                  <div className="flex-1 max-w-[120px] h-[152px] bg-black border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex items-center justify-center relative overflow-hidden">
-                    {/* Retro Steve Pixel representation */}
-                    <div className="flex flex-col items-center gap-1 scale-110">
-                      {/* Head */}
-                      <div className="w-7 h-7 bg-[#fcd34d] border border-[#b45309]" />
-                      {/* Body (shirt) */}
-                      <div className="w-10 h-10 bg-[#0ea5e9] border border-[#0369a1] flex justify-between px-1">
-                        <div className="w-1.5 h-6 bg-[#fcd34d]" />
-                        <div className="w-1.5 h-6 bg-[#fcd34d]" />
+                  {/* Center: Steve 2D Preview */}
+                  <div className="flex-1 max-w-[100px] h-[140px] bg-black border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex items-center justify-center relative overflow-hidden">
+                    <div className="flex flex-col items-center gap-1 scale-100">
+                      <div className="w-6 h-6 bg-[#fcd34d] border border-[#b45309]" />
+                      <div className="w-9 h-9 bg-[#0ea5e9] border border-[#0369a1] flex justify-between px-1">
+                        <div className="w-1.5 h-5 bg-[#fcd34d]" />
+                        <div className="w-1.5 h-5 bg-[#fcd34d]" />
                       </div>
-                      {/* Pants */}
-                      <div className="w-9 h-10 bg-[#1e3a8a] border border-[#172554] flex justify-between px-2">
-                        <div className="w-2.5 h-full bg-[#1e3a8a]" />
-                        <div className="w-2.5 h-full bg-[#1e3a8a]" />
+                      <div className="w-8 h-9 bg-[#1e3a8a] border border-[#172554] flex justify-between px-2">
+                        <div className="w-2 h-full bg-[#1e3a8a]" />
+                        <div className="w-2 h-full bg-[#1e3a8a]" />
                       </div>
                     </div>
                   </div>
 
                   {/* Right: Crafting 2x2 grid */}
                   <div className="flex flex-col items-end">
-                    <span className="text-[10px] font-arcade text-slate-700 mb-1 mr-4">Crafting</span>
-                    <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-arcade text-slate-700 mb-1 mr-2">Üretim Alanı (2x2)</span>
+                    <div className="flex items-center gap-2.5">
                       {/* 2x2 slots */}
                       <div className="grid grid-cols-2 gap-1 bg-[#8b8b8b] p-1 border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white">
-                        {Array.from({ length: 4 }).map((_, i) => (
+                        {craftingGrid.map((blk, i) => (
                           <div 
-                            key={i} 
-                            className="w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white hover:bg-slate-300 cursor-pointer"
-                          />
+                            key={i}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              if (draggedItem) {
+                                const newGrid = [...craftingGrid];
+                                newGrid[i] = draggedItem;
+                                setCraftingGrid(newGrid);
+                                sound.playTone(450, 'sine', 0.03, 0.1);
+                              }
+                            }}
+                            onClick={() => {
+                              if (draggedItem) {
+                                const newGrid = [...craftingGrid];
+                                newGrid[i] = draggedItem;
+                                setCraftingGrid(newGrid);
+                                sound.playTone(450, 'sine', 0.03, 0.1);
+                              } else if (blk) {
+                                const newGrid = [...craftingGrid];
+                                newGrid[i] = null;
+                                setCraftingGrid(newGrid);
+                                sound.playTone(350, 'sine', 0.03, 0.1);
+                              }
+                            }}
+                            className="w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white hover:bg-slate-300 cursor-pointer flex items-center justify-center relative"
+                          >
+                            {blk && <MinecraftBlockIcon type={blk} size={24} />}
+                          </div>
                         ))}
                       </div>
                       
@@ -3173,19 +3252,40 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                       <div className="text-slate-600 font-bold text-lg select-none">➡</div>
 
                       {/* Result Output slot */}
-                      <div className="w-11 h-11 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex items-center justify-center hover:bg-slate-300 cursor-pointer">
-                        <div className="w-7 h-7 bg-amber-400 border border-amber-600" title="Output slot" />
-                      </div>
+                      {(() => {
+                        const recipe = getCraftingResult();
+                        return (
+                          <div 
+                            onClick={executeCrafting}
+                            className={`w-11 h-11 border-2 flex items-center justify-center cursor-pointer transition-all ${
+                              recipe 
+                                ? 'bg-amber-300 border-t-white border-l-white border-b-amber-700 border-r-amber-700 hover:scale-105 shadow-[0_0_10px_rgba(251,191,36,0.8)]' 
+                                : 'bg-[#8b8b8b] border-t-[#373737] border-l-[#373737] border-b-white border-r-white'
+                            }`}
+                            title={recipe ? `${recipe.result} üretmek için tıklayın!` : 'Eşleşen tarif yok'}
+                          >
+                            {recipe && <MinecraftBlockIcon type={recipe.result} size={28} />}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
 
+                {/* Recipe Guide bar */}
+                <div className="bg-slate-900/10 p-1.5 border border-slate-400 text-[9px] font-mono text-slate-700 flex flex-wrap gap-2 justify-center">
+                  <span>💡 <b>Tarifler:</b> 4x Odun = TNT</span>
+                  <span>• 2x Taş = Tuğla</span>
+                  <span>• 2x Odun = Cam</span>
+                  <span>• 2x Toprak = Çimen</span>
+                </div>
+
                 {/* Middle line separator */}
-                <div className="border-t-2 border-slate-400 my-1" />
+                <div className="border-t-2 border-slate-400 my-0.5" />
 
                 {/* Bottom Section: Inventory Grid 3x9 */}
                 <div>
-                  <span className="text-[10px] font-arcade text-slate-700 mb-1 block">Inventory (Kuşanmak İçin Sürükleyin)</span>
+                  <span className="text-[10px] font-arcade text-slate-700 mb-1 block">Envanter (Eşya Sürükleyin veya Tıklayın)</span>
                   <div className="grid grid-cols-9 gap-1 bg-[#8b8b8b] p-1.5 border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white">
                     {Array.from({ length: 27 }).map((_, i) => {
                       const itemEntries = Object.entries(inventory).filter(([_, count]) => count > 0);
@@ -3194,6 +3294,12 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                       return (
                         <div 
                           key={i} 
+                          onClick={() => {
+                            if (hasItem) {
+                              setDraggedItem(hasItem[0] as BlockType);
+                              sound.playTone(600, 'sine', 0.02, 0.08);
+                            }
+                          }}
                           className="w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex items-center justify-center hover:bg-slate-300 cursor-pointer relative"
                         >
                           {hasItem && (
@@ -3205,9 +3311,8 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                               }}
                               className="w-full h-full flex items-center justify-center cursor-grab active:cursor-grabbing"
                             >
-                              {/* Beautiful 3D Isometric Textured Icon */}
                               <MinecraftBlockIcon type={hasItem[0] as BlockType} size={24} />
-                              <span className="absolute bottom-0.5 right-0.5 text-[8px] font-bold text-white bg-slate-900/60 px-0.5 rounded pointer-events-none">
+                              <span className="absolute bottom-0.5 right-0.5 text-[8px] font-bold text-white bg-slate-900/70 px-0.5 rounded pointer-events-none">
                                 {hasItem[1]}
                               </span>
                             </div>
@@ -3219,8 +3324,8 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                 </div>
 
                 {/* Hotbar Section in Inventory Grid 1x8 (Sync with Live Slots) */}
-                <div className="mt-1">
-                  <span className="text-[10px] font-arcade text-slate-700 mb-1 block">Hotbar (Hızlı Erişim - Drop Slotu)</span>
+                <div className="mt-0.5">
+                  <span className="text-[10px] font-arcade text-slate-700 mb-1 block">Hotbar (Hızlı Erişim Slotları)</span>
                   <div className="grid grid-cols-8 gap-1 bg-[#8b8b8b] p-1.5 border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white">
                     {hotbarSlots.map((blk, idx) => {
                       const isSelected = selectedBlock === blk && blk !== null;
@@ -3246,18 +3351,18 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                             }
                           }}
                           className={`w-9 h-9 bg-[#8b8b8b] border-2 border-t-[#373737] border-l-[#373737] border-b-white border-r-white flex flex-col items-center justify-center hover:bg-slate-300 cursor-pointer relative ${
-                            isSelected ? 'bg-amber-400/20 border-amber-400' : ''
+                            isSelected ? 'bg-amber-400/30 border-amber-400' : ''
                           }`}
                         >
                           {blk ? (
                             <>
                               <MinecraftBlockIcon type={blk} size={20} />
-                              <span className="absolute bottom-0.5 right-0.5 text-[7px] font-bold text-white bg-slate-900/60 px-0.5 rounded">
+                              <span className="absolute bottom-0.5 right-0.5 text-[7px] font-bold text-white bg-slate-900/70 px-0.5 rounded">
                                 {inventory[blk] || 0}
                               </span>
                             </>
                           ) : null}
-                          <span className="absolute top-0.5 left-0.5 text-[7px] font-bold text-slate-400">
+                          <span className="absolute top-0.5 left-0.5 text-[7px] font-bold text-slate-600">
                             {idx + 1}
                           </span>
                         </div>
@@ -3267,7 +3372,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                 </div>
 
                 {/* Crafting Action Shortcuts at bottom */}
-                <div className="flex gap-2 justify-between mt-2 pt-2 border-t border-slate-400">
+                <div className="flex gap-2 justify-between mt-1 pt-1.5 border-t border-slate-400">
                   <button 
                     onClick={() => craftBlock('stone', 'brick', 2)} 
                     className="flex-1 py-1.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-[8px] tracking-tight rounded-none"
@@ -3279,6 +3384,12 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
                     className="flex-1 py-1.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-[8px] tracking-tight rounded-none"
                   >
                     Odun ➡ TNT (4 Odun)
+                  </button>
+                  <button 
+                    onClick={() => craftBlock('wood', 'glass', 2)} 
+                    className="flex-1 py-1.5 bg-[#4a4a4a] hover:bg-[#5a5a5a] text-[#e0e0e0] hover:text-[#ffffa0] border-2 border-t-[#8a8a8a] border-l-[#8a8a8a] border-b-[#2a2a2a] border-r-[#2a2a2a] font-arcade text-[8px] tracking-tight rounded-none"
+                  >
+                    Odun ➡ Cam (2 Odun)
                   </button>
                 </div>
               </div>
