@@ -77,6 +77,20 @@ const BLOCK_DEFS: Record<BlockType, BlockDef> = {
   beef: { id: 'beef', name: 'Çiğ Sığır Eti', color: '#f43f5e', scoreVal: 20 },
 };
 
+const BLOCK_BREAK_TIMES: Record<BlockType, number> = {
+  grass: 0.5,
+  stone: 1.2,
+  dirt: 0.4,
+  wood: 0.8,
+  birch: 0.8,
+  leaves: 0.25,
+  diamond: 1.8,
+  glass: 0.3,
+  brick: 1.0,
+  tnt: 0.4,
+  beef: 0.1,
+};
+
 const INITIAL_HOTBAR: (BlockType | null)[] = [null, null, null, null, null, null, null, null];
 
 const MinecraftHeart: React.FC<{ fill: 'full' | 'half' | 'empty' }> = ({ fill }) => {
@@ -542,6 +556,11 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     steeringSensitivity: 2,
   });
 
+  const [miningProgress, setMiningProgress] = useState<number>(0);
+  const isMouseDownLeftRef = useRef<boolean>(false);
+  const miningBlockRef = useRef<{ x: number; y: number; z: number; type: BlockType; progress: number; totalTime: number } | null>(null);
+  const lastMineSoundTimeRef = useRef<number>(0);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -607,6 +626,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const lastNetworkSendRef = useRef<number>(0);
   const isJumpingRef = useRef<boolean>(false);
   const selectedBlockRef = useRef<BlockType | null>(selectedBlock);
+  const crackMeshRef = useRef<THREE.LineSegments | null>(null);
 
   useEffect(() => {
     selectedBlockRef.current = selectedBlock;
@@ -1325,6 +1345,48 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     };
   }, [upsertRemotePlayer, removeRemotePlayer, addBlock, removeBlock]);
 
+  // TNT explosion
+  const explodeTnt = useCallback((cx: number, cy: number, cz: number) => {
+    sound.playExplosion();
+    setTntNotice('💥 TNT PATLADI! ÇEVRE BLOKLAR PARÇALANDI');
+    setTimeout(() => setTntNotice(null), 2500);
+
+    const radius = 3;
+    for (let x = cx - radius; x <= cx + radius; x++) {
+      for (let y = cy - radius; y <= cy + radius; y++) {
+        for (let z = cz - radius; z <= cz + radius; z++) {
+          if (Math.hypot(x - cx, y - cy, z - cz) <= radius) {
+            removeBlock(x, y, z);
+          }
+        }
+      }
+    }
+  }, [removeBlock]);
+
+  const breakBlockAt = useCallback((bx: number, by: number, bz: number) => {
+    const minedType = removeBlock(bx, by, bz);
+    if (minedType) {
+      sendBlockBreak(bx, by, bz);
+      addToInventory(minedType);
+      if (minedType === 'tnt') {
+        explodeTnt(bx, by, bz);
+      } else {
+        sound.playTone(380, 'sine', 0.08, 0.2);
+        setBlocksMined((b) => b + 1);
+        if (minedType === 'diamond') {
+          sound.playBonus();
+          setDiamondsFound((d) => d + 1);
+        }
+        const pts = BLOCK_DEFS[minedType].scoreVal;
+        setScore((s) => {
+          const newScore = s + pts;
+          onUpdateHighScore(newScore);
+          return newScore;
+        });
+      }
+    }
+  }, [removeBlock, sendBlockBreak, addToInventory, explodeTnt, onUpdateHighScore]);
+
   // Host a new online world
   const handleHostGame = async () => {
     setIsConnecting(true);
@@ -1391,23 +1453,6 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     sound.playBonus();
   };
 
-  // TNT explosion
-  const explodeTnt = useCallback((cx: number, cy: number, cz: number) => {
-    sound.playExplosion();
-    setTntNotice('💥 TNT PATLADI! ÇEVRE BLOKLAR PARÇALANDI');
-    setTimeout(() => setTntNotice(null), 2500);
-
-    const radius = 3;
-    for (let x = cx - radius; x <= cx + radius; x++) {
-      for (let y = cy - radius; y <= cy + radius; y++) {
-        for (let z = cz - radius; z <= cz + radius; z++) {
-          if (Math.hypot(x - cx, y - cy, z - cz) <= radius) {
-            removeBlock(x, y, z);
-          }
-        }
-      }
-    }
-  }, [removeBlock]);
 
   // Cow 3D Mesh Generator
   const createCowMesh = useCallback(() => {
@@ -1606,6 +1651,15 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     highlightBox.visible = false;
     scene.add(highlightBox);
     highlightMeshRef.current = highlightBox;
+
+    // 6.5. Block Breaking Crack Animation Overlay Box
+    const crackGeo = new THREE.BoxGeometry(1.04, 1.04, 1.04);
+    const crackEdges = new THREE.EdgesGeometry(crackGeo);
+    const crackMat = new THREE.LineBasicMaterial({ color: '#facc15', linewidth: 3, transparent: true, opacity: 0.9 });
+    const crackBox = new THREE.LineSegments(crackEdges, crackMat);
+    crackBox.visible = false;
+    scene.add(crackBox);
+    crackMeshRef.current = crackBox;
 
     // 7. Steve 3D mesh
     const steve = createSteveMesh();
@@ -1915,31 +1969,23 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       const bz = Math.round(targetMesh.position.z);
 
       if (e.button === 0) {
-        // LEFT CLICK: MINE / BREAK BLOCK
+        // LEFT CLICK: START HOLD-TO-MINE SURVIVAL BLOCK
         punchAnimRef.current = 1.0;
         sendPlayerPunch();
 
-        const minedType = removeBlock(bx, by, bz);
-        if (minedType) {
-          sendBlockBreak(bx, by, bz);
-          addToInventory(minedType); // Add to inventory
-          if (minedType === 'tnt') {
-            explodeTnt(bx, by, bz);
-          } else {
-            sound.playTone(320, 'sine', 0.06, 0.2);
-            setBlocksMined((b) => b + 1);
-            if (minedType === 'diamond') {
-              sound.playBonus();
-              setDiamondsFound((d) => d + 1);
-            }
-            const pts = BLOCK_DEFS[minedType].scoreVal;
-            setScore((s) => {
-              const newScore = s + pts;
-              onUpdateHighScore(newScore);
-              return newScore;
-            });
-          }
-        }
+        const blockVal = worldBlocksRef.current.get(`${bx},${by},${bz}`);
+        const blockType = blockVal ? blockVal.type : 'dirt';
+
+        isMouseDownLeftRef.current = true;
+        miningBlockRef.current = {
+          x: bx,
+          y: by,
+          z: bz,
+          type: blockType,
+          progress: 0,
+          totalTime: BLOCK_BREAK_TIMES[blockType] || 0.8,
+        };
+        setMiningProgress(0.01);
       } else if (e.button === 2) {
         // RIGHT CLICK: PLACE SELECTED BLOCK ON FACE
         e.preventDefault();
@@ -1987,6 +2033,14 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       }
     };
 
+    const handleMouseUp = (e: MouseEvent) => {
+      if (e.button === 0) {
+        isMouseDownLeftRef.current = false;
+        miningBlockRef.current = null;
+        setMiningProgress(0);
+      }
+    };
+
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
 
     const handleClick = () => {
@@ -1999,12 +2053,14 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
     container.addEventListener('mousemove', handleMouseMove);
     container.addEventListener('mousedown', handleMouseDown);
+    container.addEventListener('mouseup', handleMouseUp);
     container.addEventListener('contextmenu', handleContextMenu);
     container.addEventListener('click', handleClick);
 
     return () => {
       container.removeEventListener('mousemove', handleMouseMove);
       container.removeEventListener('mousedown', handleMouseDown);
+      container.removeEventListener('mouseup', handleMouseUp);
       container.removeEventListener('contextmenu', handleContextMenu);
       container.removeEventListener('click', handleClick);
     };
@@ -2112,6 +2168,77 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       const now = performance.now();
       const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
+
+      const crack = crackMeshRef.current;
+
+      // Block mining continuous progress update
+      if (isMouseDownLeftRef.current && miningBlockRef.current && camera) {
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+        raycaster.far = 7;
+
+        const blockMeshes: THREE.Mesh[] = [];
+        worldBlocksRef.current.forEach((val) => blockMeshes.push(val.mesh));
+        const intersectsBlocks = raycaster.intersectObjects(blockMeshes, false);
+        const hitBlock = intersectsBlocks.length > 0 ? intersectsBlocks[0] : null;
+
+        if (hitBlock) {
+          const targetMesh = hitBlock.object as THREE.Mesh;
+          const bx = Math.round(targetMesh.position.x);
+          const by = Math.round(targetMesh.position.y);
+          const bz = Math.round(targetMesh.position.z);
+
+          const mb = miningBlockRef.current;
+          if (bx === mb.x && by === mb.y && bz === mb.z) {
+            mb.progress += dt;
+            setMiningProgress(mb.progress / mb.totalTime);
+
+            // Update crack animation overlay wireframe on the block being mined
+            if (crack) {
+              crack.position.set(bx, by, bz);
+              crack.visible = true;
+              const ratio = mb.progress / mb.totalTime;
+              const mat = crack.material as THREE.LineBasicMaterial;
+              if (mat) {
+                if (ratio > 0.75) {
+                  mat.color.set('#ef4444'); // Red / about to break
+                } else if (ratio > 0.4) {
+                  mat.color.set('#f97316'); // Orange / cracking
+                } else {
+                  mat.color.set('#facc15'); // Yellow / starting crack
+                }
+                const wobble = 1.04 + Math.sin(now * 0.04) * 0.04 * ratio;
+                crack.scale.set(wobble, wobble, wobble);
+              }
+            }
+
+            if (now - lastMineSoundTimeRef.current > 250) {
+              lastMineSoundTimeRef.current = now;
+              sound.playTone(280 + Math.random() * 60, 'sawtooth', 0.04, 0.05);
+            }
+
+            if (mb.progress >= mb.totalTime) {
+              if (crack) crack.visible = false;
+              breakBlockAt(bx, by, bz);
+              miningBlockRef.current = null;
+              setMiningProgress(0);
+            }
+          } else {
+            if (crack) crack.visible = false;
+            miningBlockRef.current = null;
+            setMiningProgress(0);
+          }
+        } else {
+          if (crack) crack.visible = false;
+          miningBlockRef.current = null;
+          setMiningProgress(0);
+        }
+      } else {
+        if (crack) crack.visible = false;
+        if (miningProgress > 0) {
+          setMiningProgress(0);
+        }
+      }
 
       // 1. Update Cow Mobs AI and legs animations
       const mobs = mobsRef.current;
@@ -2860,6 +2987,18 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
               <div className="relative w-4 h-4 flex items-center justify-center">
                 <div className="w-3.5 h-0.5 bg-white/90 drop-shadow" />
                 <div className="h-3.5 w-0.5 bg-white/90 absolute drop-shadow" />
+              </div>
+            </div>
+          )}
+
+          {/* Block Breaking Progress Bar */}
+          {miningProgress > 0 && (
+            <div className="absolute top-[56%] left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 pointer-events-none flex flex-col items-center">
+              <div className="w-20 h-2 bg-black/80 border border-slate-600 rounded-none p-0.5">
+                <div 
+                  className="h-full bg-amber-400 transition-all duration-75 shadow-[0_0_8px_rgba(251,191,36,0.8)]"
+                  style={{ width: `${Math.min(100, miningProgress * 100)}%` }}
+                />
               </div>
             </div>
           )}
