@@ -133,7 +133,7 @@ const MinecraftHunger: React.FC<{ fill: 'full' | 'half' | 'empty' }> = ({ fill }
   );
 };
 
-// True 16x16 pixel art texture generator
+// True 16x16 pixel art texture generator with nearest filter settings
 const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bottom') => {
   const size = 16;
   const canvas = document.createElement('canvas');
@@ -213,7 +213,6 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
         if (isMeat) setPixel(x, y, 230 + rFactor, 60, 70);
         else setPixel(x, y, 0, 0, 0, 0);
       } else {
-        // Leaves
         const isHole = Math.random() < 0.15;
         if (isHole) setPixel(x, y, 16, 90, 24, 60);
         else setPixel(x, y, 34, 139, 34);
@@ -295,6 +294,20 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const [blocksMined, setBlocksMined] = useState<number>(0);
   const [blocksPlaced, setBlocksPlaced] = useState<number>(0);
 
+  // Multiplayer & Chat States
+  const [roomMode, setRoomMode] = useState<'menu' | 'host' | 'join'>('menu');
+  const [roomId, setRoomId] = useState<string>('');
+  const [generatedRoomCode, setGeneratedRoomCode] = useState<string>('');
+  const [joinCodeInput, setJoinCodeInput] = useState<string>('');
+  const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [connectedPlayers, setConnectedPlayers] = useState<NetworkPlayer[]>([]);
+  const [isMultiplayerActive, setIsMultiplayerActive] = useState<boolean>(false);
+  const [chatMessages, setChatMessages] = useState<Array<{ id: string; name: string; color: string; text: string; timestamp: number }>>([]);
+  const [chatInput, setChatInput] = useState<string>('');
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
+
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -303,7 +316,6 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const playerVelocityRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const isGroundedRef = useRef<boolean>(false);
 
-  // Keyboard controls tracking
   const keysPressedRef = useRef<{ [key: string]: boolean }>({});
 
   useEffect(() => {
@@ -329,7 +341,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     };
   }, []);
 
-  // Main Three.js Initialization & Render Loop
+  // Main Three.js Initialization & Render Loop with Raycaster Block Breaking
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -348,7 +360,6 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);
 
-    // Ambient & Directional Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
@@ -356,11 +367,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     dirLight.position.set(50, 100, 50);
     scene.add(dirLight);
 
-    // Initialize ChunkManager
     const chunkManager = new ChunkManager(scene);
     chunkManagerRef.current = chunkManager;
 
-    // Pointer Lock & Mouse Look
     let yaw = 0;
     let pitch = 0;
     const handleMouseMove = (e: MouseEvent) => {
@@ -381,14 +390,13 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     container.addEventListener('click', handleCanvasClick);
     document.addEventListener('mousemove', handleMouseMove);
 
-    // Mouse Down - Break / Place Blocks
+    // Mouse Down - Safe Raycaster Breaking & Placing Blocks
     const handleMouseDown = (e: MouseEvent) => {
       if (document.pointerLockElement !== container || isPaused) return;
 
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(_screenCenter, camera);
 
-      // Collect all chunk meshes for intersection check
       const intersects: THREE.Intersection[] = [];
       scene.traverse((obj) => {
         if ((obj as THREE.Mesh).isMesh && obj !== camera) {
@@ -439,7 +447,6 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     container.addEventListener('mousedown', handleMouseDown);
     container.addEventListener('contextmenu', handleContextMenu);
 
-    // Game Animation & Physics Loop
     let lastTime = performance.now();
     const animate = () => {
       animationFrameIdRef.current = requestAnimationFrame(animate);
@@ -449,7 +456,6 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       lastTime = time;
 
       if (!isPaused && document.pointerLockElement === container) {
-        // Handle Movement Keys
         const speed = 5.0 * delta;
         const keys = keysPressedRef.current;
 
@@ -466,7 +472,6 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         playerPosRef.current.x += moveDir.x * speed;
         playerPosRef.current.z += moveDir.z * speed;
 
-        // Gravity & Vertical Physics
         playerVelocityRef.current.y -= 20 * delta;
         playerPosRef.current.y += playerVelocityRef.current.y * delta;
 
@@ -475,20 +480,17 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
           isGroundedRef.current = false;
         }
 
-        // Simple Floor Collision Check
         if (playerPosRef.current.y < 2) {
           playerPosRef.current.y = 2;
           playerVelocityRef.current.y = 0;
           isGroundedRef.current = true;
         }
 
-        // Update Camera Position & Rotation
         camera.position.copy(playerPosRef.current);
         camera.rotation.set(0, 0, 0);
         camera.rotation.y = yaw;
         camera.rotation.x = pitch;
 
-        // Stream Chunks Around Player
         const pChunkX = Math.floor(playerPosRef.current.x / 16);
         const pChunkZ = Math.floor(playerPosRef.current.z / 16);
         chunkManager.updateChunks(pChunkX, pChunkZ);
@@ -513,14 +515,14 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       container.removeEventListener('mousedown', handleMouseDown);
       container.removeEventListener('contextmenu', handleContextMenu);
       document.removeEventListener('mousemove', handleMouseMove);
-      if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
       renderer.dispose();
     };
   }, [isPaused]);
 
+  const animationFrameIdRef = useRef<number | null>(null);
+
   return (
     <div className="relative w-full max-w-4xl h-[550px] bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl flex flex-col select-none">
-      {/* 3D Canvas Viewport */}
       <div ref={containerRef} className="relative w-full h-full cursor-crosshair">
         {!gameStarted && (
           <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center z-20">
@@ -538,14 +540,12 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
           </div>
         )}
 
-        {/* Crosshair */}
         {gameStarted && !isPaused && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
             <div className="w-1.5 h-1.5 bg-white/80 rounded-full border border-black/50" />
           </div>
         )}
 
-        {/* HUD: Hearts & Hunger */}
         {gameStarted && (
           <div className="absolute top-4 left-4 flex flex-col gap-1.5 z-10 bg-slate-950/60 p-2.5 rounded-xl backdrop-blur-md border border-slate-800">
             <div className="flex gap-1">
@@ -561,7 +561,6 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
           </div>
         )}
 
-        {/* Hotbar */}
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1 bg-slate-950/80 p-2 rounded-2xl border border-slate-700 backdrop-blur-md z-10">
           {(['grass', 'stone', 'dirt', 'wood', 'brick', 'glass', 'diamond', 'tnt'] as BlockType[]).map((type) => (
             <button
