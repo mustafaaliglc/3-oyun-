@@ -15,6 +15,7 @@ import { PongGame } from './components/games/PongGame';
 import { GlobalLeaderboardModal } from './components/GlobalLeaderboardModal';
 import { submitScoreToFirestore } from './services/firebaseLeaderboard';
 import { sound } from './utils/audio';
+import { ClaudeChat } from './components/ClaudeChat';
 
 const STORAGE_KEY = 'retro_arcade_3d_scores_v5';
 
@@ -153,6 +154,11 @@ export default function App() {
               highScore={scores[activeGameId] || 0}
               onResetScore={() => handleResetGameScore(activeGameId)}
             />
+            
+            <div className="w-full max-w-4xl mt-8">
+              <h2 className="text-xl font-bold mb-4">Claude AI Assistant</h2>
+              <ClaudeChat />
+            </div>
 
             <footer className="w-full max-w-4xl text-center py-8 mt-6 border-t border-slate-900 text-xs text-slate-500">
               <p>Minecraft 3D, Flappy Bird & Pong Online Oyun Arenası</p>

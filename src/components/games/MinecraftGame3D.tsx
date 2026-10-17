@@ -33,6 +33,11 @@ import {
   NetworkPlayer,
   BlockEvent,
 } from '../../services/minecraftMultiplayer';
+import { ChunkManager, VoxelRaycaster, BlockId, TextureAtlas } from '../../voxel';
+
+// Zero-GC pre-allocated math objects for render loop
+const _raycaster = new THREE.Raycaster();
+const _screenCenter = new THREE.Vector2(0, 0);
 
 interface MinecraftGameProps {
   game: GameInfo;
@@ -137,7 +142,7 @@ const MinecraftHunger: React.FC<{ fill: 'full' | 'half' | 'empty' }> = ({ fill }
 };
 
 const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bottom') => {
-  const size = 16;
+  const size = 8;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -160,8 +165,8 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
     // Cobblestone (Kırıktaş) - Gray cobbles with dark borders (Matching uploaded image 1)
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        const isBorder = (y === 0 || y === 8 || x === 0 || x === 8 || (y < 8 && x === 4) || (y >= 8 && x === 12));
-        const rFactor = Math.sin(x * 12.3) * Math.cos(y * 7.7) * 12 + Math.random() * 8;
+        const isBorder = (y === 0 || y === 4 || x === 0 || x === 4 || (y < 4 && x === 2) || (y >= 4 && x === 6));
+        const rFactor = Math.sin(x * 12.3) * Math.cos(y * 7.7) * 6 + Math.random() * 4;
         if (isBorder) {
           setPixel(x, y, 78 + rFactor, 78 + rFactor, 78 + rFactor); // Dark gray mortar/joint outlines
         } else {
@@ -174,7 +179,7 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
       // Grass Top - Lush vibrant green (Matching uploaded image 2)
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          const rFactor = Math.sin(x * 14.2) * Math.cos(y * 9.1) * 14 + Math.random() * 10;
+          const rFactor = Math.sin(x * 14.2) * Math.cos(y * 9.1) * 7 + Math.random() * 5;
           setPixel(x, y, 76 + rFactor, 180 + rFactor * 0.8, 55 + rFactor * 0.5);
         }
       }
@@ -182,7 +187,7 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
       // Dirt (Bottom) - Rich brown soil (Matching uploaded image 3)
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          const rFactor = Math.sin(x * 9.4) * Math.cos(y * 12.1) * 15 + Math.random() * 10;
+          const rFactor = Math.sin(x * 9.4) * Math.cos(y * 12.1) * 7.5 + Math.random() * 5;
           setPixel(x, y, 98 + rFactor, 66 + rFactor, 43 + rFactor);
         }
       }
@@ -191,10 +196,10 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
           const baseGrassDepth = 4;
-          const isGrass = y < baseGrassDepth || 
-            (y === 4 && (x % 3 === 0 || x % 5 === 1)) || 
-            (y === 5 && (x === 3 || x === 10 || x === 14));
-          const rFactor = Math.sin(x * 9.4) * Math.cos(y * 12.1) * 12 + Math.random() * 8;
+          const isGrass = y < 2 || 
+            (y === 2 && (x % 2 === 0)) || 
+            (y === 3 && (x === 1 || x === 5 || x === 7));
+          const rFactor = Math.sin(x * 9.4) * Math.cos(y * 12.1) * 6 + Math.random() * 4;
           if (isGrass) {
             setPixel(x, y, 76 + rFactor, 180 + rFactor * 0.8, 55 + rFactor * 0.5); // Green grass
           } else {
@@ -207,8 +212,8 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
     // Dirt (Toprak) - Brown earthy pixels with occasional pebble stones (Matching uploaded image 3)
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        const rFactor = Math.sin(x * 11.2) * Math.cos(y * 13.4) * 15 + Math.random() * 12;
-        const isPebble = (x === 3 && y === 4) || (x === 11 && y === 12) || (x === 7 && y === 2);
+        const rFactor = Math.sin(x * 11.2) * Math.cos(y * 13.4) * 7.5 + Math.random() * 6;
+        const isPebble = (x === 1 && y === 2) || (x === 5 && y === 6) || (x === 3 && y === 1);
         if (isPebble) {
           setPixel(x, y, 125 + rFactor * 0.4, 125 + rFactor * 0.4, 125 + rFactor * 0.4); // Pebble gray
         } else {
@@ -225,7 +230,7 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
           const dx = x - 7.5;
           const dy = y - 7.5;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const isRing = Math.floor(dist) % 2 === 0;
+          const isRing = Math.floor(dist) % 1 === 0;
           if (isRing) {
             setPixel(x, y, 192, 154, 114); // Inner cream body
           } else {
@@ -256,7 +261,7 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
           const dx = x - 7.5;
           const dy = y - 7.5;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const isRing = Math.floor(dist) % 3 === 0;
+          const isRing = Math.floor(dist) % 2 === 0;
           if (isRing) {
             setPixel(x, y, 225, 210, 185); // Cream ring
           } else {
@@ -268,10 +273,10 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
       // Wood Side: White birch bark with black horizontal notches
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          const isNotch = (y === 3 && x >= 2 && x <= 6) || 
-            (y === 11 && x >= 10 && x <= 14) || 
-            (y === 7 && (x <= 2 || x >= 13)) ||
-            (y === 14 && x >= 5 && x <= 9);
+          const isNotch = (y === 1 && x >= 1 && x <= 3) || 
+            (y === 5 && x >= 5 && x <= 7) || 
+            (y === 3 && (x <= 1 || x >= 6)) ||
+            (y === 7 && x >= 2 && x <= 4);
           const rFactor = Math.random() * 10;
           if (isNotch) {
             setPixel(x, y, 36 + rFactor, 36 + rFactor, 36 + rFactor); // Black notch
@@ -286,7 +291,7 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const rFactor = Math.sin(x * 12.3) * Math.cos(y * 8.8) * 15 + Math.random() * 10;
-        const isGlow = (x === 3 && y === 3) || (x === 4 && y === 2) || (x === 11 && y === 10) || (x === 12 && y === 9);
+        const isGlow = (x === 1 && y === 1) || (x === 2 && y === 1) || (x === 5 && y === 5) || (x === 6 && y === 4);
         if (isGlow) {
           setPixel(x, y, 255, 255, 255);
         } else {
@@ -299,7 +304,7 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         const isBorder = (x === 0 || y === 0 || x === 15 || y === 15);
-        const isHighlight = (x === y && x >= 3 && x <= 6) || (x === y - 5 && x >= 8 && x <= 10);
+        const isHighlight = (x === y && x >= 1 && x <= 3) || (x === y - 2 && x >= 4 && x <= 5);
         const idx = (y * size + x) * 4;
         if (isBorder) {
           data[idx] = 186; data[idx + 1] = 230; data[idx + 2] = 253; data[idx + 3] = 180;
@@ -314,7 +319,7 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
     // Red clay bricks
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        const isMortar = (y % 4 === 0) || (y < 4 && x === 4) || (y >= 4 && y < 8 && x === 12) || (y >= 8 && y < 12 && x === 4) || (y >= 12 && x === 12);
+        const isMortar = (y % 2 === 0) || (y < 2 && x === 2) || (y >= 2 && y < 4 && x === 6) || (y >= 4 && y < 6 && x === 2) || (y >= 6 && x === 6);
         const rFactor = Math.random() * 15;
         if (isMortar) {
           setPixel(x, y, 212, 212, 212); // Gray mortar
@@ -327,10 +332,10 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
     // TNT explosives with red blocks and white stripe containing black TNT letters
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
-        const isWhiteStripe = (y >= 5 && y <= 9);
-        const isT1 = (y === 6 && x >= 2 && x <= 4) || (x === 3 && y >= 6 && y <= 8);
-        const isN = (x === 5 && y >= 6 && y <= 8) || (x === 7 && y >= 6 && y <= 8) || (x === 6 && y === 7);
-        const isT2 = (y === 6 && x >= 8 && x <= 10) || (x === 9 && y >= 6 && y <= 8);
+        const isWhiteStripe = (y >= 2 && y <= 4);
+        const isT1 = (y === 3 && x >= 1 && x <= 2) || (x === 1 && y >= 3 && y <= 4);
+        const isN = (x === 3 && y >= 3 && y <= 4) || (x === 4 && y >= 3 && y <= 4) || (x === 3 && y === 3);
+        const isT2 = (y === 3 && x >= 5 && x <= 6) || (x === 5 && y >= 3 && y <= 4);
         const isText = isWhiteStripe && (isT1 || isN || isT2);
 
         const rFactor = Math.random() * 12;
@@ -348,8 +353,8 @@ const generateMinecraftTexture = (type: BlockType, face?: 'top' | 'side' | 'bott
     for (let y = 0; y < size; y++) {
       for (let x = 0; x < size; x++) {
         // Pixel-art diagonal raw steak
-        const isBone = (x === y && (x <= 3 || x >= 12)) || (x === y + 1 && (x <= 3 || x >= 12)) || (x === y - 1 && (x <= 3 || x >= 12));
-        const isMeat = !isBone && (x + y >= 8 && x + y <= 22 && Math.abs(x - y) <= 5);
+        const isBone = (x === y && (x <= 1 || x >= 6)) || (x === y + 1 && (x <= 1 || x >= 6)) || (x === y - 1 && (x <= 1 || x >= 6));
+        const isMeat = !isBone && (x + y >= 4 && x + y <= 11 && Math.abs(x - y) <= 2);
         const rFactor = Math.random() * 15;
         const idx = (y * size + x) * 4;
         
@@ -464,7 +469,7 @@ const MinecraftBlockIcon: React.FC<{ type: BlockType; size?: number }> = ({ type
 };
 
 const generateCowTexture = (part: 'body' | 'head' | 'leg') => {
-  const size = 16;
+  const size = 8;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -628,6 +633,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const isJumpingRef = useRef<boolean>(false);
   const selectedBlockRef = useRef<BlockType | null>(selectedBlock);
   const crackMeshRef = useRef<THREE.LineSegments | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     selectedBlockRef.current = selectedBlock;
@@ -813,7 +819,25 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const worldBlocksRef = useRef<Map<string, { mesh: THREE.Mesh; type: BlockType }>>(new Map());
+  const chunkManagerRef = useRef<ChunkManager | null>(null);
+  const worldBlocksRef = useRef({
+    has: (key: string) => {
+      const [x, y, z] = key.split(',').map(Number);
+      return chunkManagerRef.current?.hasBlock(x, y, z) ?? false;
+    },
+    get: (key: string) => {
+      const [x, y, z] = key.split(',').map(Number);
+      const name = chunkManagerRef.current?.getBlockName(x, y, z);
+      if (!name || name === 'air') return undefined;
+      return { type: name as BlockType, mesh: null as any };
+    },
+    forEach: (_callback: (val: { mesh: THREE.Mesh; type: BlockType }, key: string) => void) => {
+      // Compatibility stub for any legacy iteration
+    },
+    set: () => {},
+    delete: () => {},
+  } as any);
+
   const highlightMeshRef = useRef<THREE.LineSegments | null>(null);
   const steveMeshRef = useRef<THREE.Group | null>(null);
   const animationFrameIdRef = useRef<number | null>(null);
@@ -948,6 +972,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     isJumping: false,
     armSwing: 0,
   });
+  const lastSafeYRef = useRef<number>(8);
+  const lastPosXRef = useRef<number>(0);
+  const lastPosZRef = useRef<number>(0);
 
   const keysRef = useRef<{ w: boolean; s: boolean; a: boolean; d: boolean; space: boolean }>({
     w: false,
@@ -1052,75 +1079,27 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
 
 
-  // Add a block to world
+  // Add a block to world using optimized ChunkManager
   const addBlock = useCallback((x: number, y: number, z: number, type: BlockType) => {
-    const scene = sceneRef.current;
-    if (!scene) return;
+    chunkManagerRef.current?.setBlock(Math.round(x), Math.round(y), Math.round(z), type);
+  }, []);
 
+  // Remove/break block from world using optimized ChunkManager breakBlock
+  const removeBlock = useCallback((x: number, y: number, z: number): BlockType | null => {
     const rx = Math.round(x);
     const ry = Math.round(y);
     const rz = Math.round(z);
-    const key = `${rx},${ry},${rz}`;
-    if (worldBlocksRef.current.has(key)) return;
-
-    const geo = sharedBoxGeoRef.current;
-    const mat = getBlockMaterial(type);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(rx, ry, rz);
-
-    scene.add(mesh);
-    worldBlocksRef.current.set(key, { mesh, type });
-  }, [getBlockMaterial]);
-
-  // Remove block from world
-  const removeBlock = useCallback((x: number, y: number, z: number) => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-
-    const key = `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
-    const record = worldBlocksRef.current.get(key);
-    if (!record) return;
-
-    scene.remove(record.mesh);
-    // Note: Do NOT dispose record.mesh.geometry here as it is the sharedBoxGeoRef geometry used by all world blocks!
-    worldBlocksRef.current.delete(key);
-    return record.type;
+    const broken = chunkManagerRef.current?.breakBlock(rx, ry, rz);
+    if (!broken || broken === 'air') return null;
+    return broken as BlockType;
   }, []);
 
-  // Precision ground height detector: measures the exact top face of solid blocks under a footprint
+  // Precision ground height detector: measures the exact top face of solid blocks using voxel data
   const getGroundHeightAt = useCallback((x: number, z: number, currentFeetY: number): number => {
-    // 5-point footprint sampling (center + 4 cardinal corners with 0.26 radius)
-    const footprintRadius = 0.26;
-    const samplePoints: [number, number][] = [
-      [0, 0],
-      [footprintRadius, 0],
-      [-footprintRadius, 0],
-      [0, footprintRadius],
-      [0, -footprintRadius],
-    ];
-
-    let maxGroundY = -30;
-    // Search downwards starting from just above the feet
-    const startY = Math.min(30, Math.floor(currentFeetY + 0.6));
-
-    for (const [ox, oz] of samplePoints) {
-      const sx = Math.round(x + ox);
-      const sz = Math.round(z + oz);
-
-      for (let y = startY; y >= -15; y--) {
-        const key = `${sx},${y},${sz}`;
-        if (worldBlocksRef.current.has(key)) {
-          const topFaceY = y + 0.5; // Top face of a 1x1x1 cube centered at integer y
-          if (topFaceY <= currentFeetY + 0.55 && topFaceY > maxGroundY) {
-            maxGroundY = topFaceY;
-          }
-          break; // Found highest solid block for this footprint sample
-        }
-      }
+    if (chunkManagerRef.current) {
+      return chunkManagerRef.current.getGroundHeightAt(x, z, currentFeetY);
     }
-
-    // Default safe bedrock floor if nothing found underneath
-    return maxGroundY === -30 ? -5.5 : maxGroundY;
+    return -5.5;
   }, []);
 
   // Keep stable refs updated
@@ -1411,7 +1390,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
   const breakBlockAt = useCallback((bx: number, by: number, bz: number) => {
     const minedType = removeBlock(bx, by, bz);
-    if (minedType) {
+    if (minedType && minedType in BLOCK_DEFS) {
       sendBlockBreak(bx, by, bz);
       addToInventory(minedType);
       if (minedType === 'tnt') {
@@ -1423,7 +1402,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
           sound.playBonus();
           setDiamondsFound((d) => d + 1);
         }
-        const pts = BLOCK_DEFS[minedType].scoreVal;
+        const pts = BLOCK_DEFS[minedType]?.scoreVal || 10;
         setScore((s) => {
           const newScore = s + pts;
           onUpdateHighScore(newScore);
@@ -1578,8 +1557,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       
       let ry = 8;
       for (let y = 20; y >= -10; y--) {
-        const key = `${rx},${y},${rz}`;
-        if (worldBlocksRef.current.has(key)) {
+        if (chunkManagerRef.current?.hasBlock(rx, y, rz)) {
           ry = y + 1.0;
           break;
         }
@@ -1611,50 +1589,65 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     }
   }, [createCowMesh]);
 
-  // High-Performance Solid Underground Terrain Generator
-  const generateWorld = useCallback((worldSize: number) => {
-    const minY = -6; // Solid bedrock/stone floor layer
+  const spawnAdditionalCows = useCallback((count: number) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
 
-    for (let x = -worldSize; x <= worldSize; x++) {
-      for (let z = -worldSize; z <= worldSize; z++) {
-        const hill = Math.floor(Math.sin(x * 0.28) * Math.cos(z * 0.28) * 2.2 + 4);
-        const surfaceY = Math.max(2, hill);
-
-        // 1. Bottom Bedrock/Stone Floor Layer
-        addBlock(x, minY, z, 'stone');
-
-        // 2. Solid Underground Stone & Diamond Layer (from minY + 1 up to surfaceY - 2)
-        for (let y = minY + 1; y < surfaceY - 1; y++) {
-          const isDiamond = Math.random() < 0.035;
-          addBlock(x, y, z, isDiamond ? 'diamond' : 'stone');
-        }
-
-        // 3. Subsurface Dirt Layer
-        addBlock(x, surfaceY - 1, z, 'dirt');
-
-        // 4. Surface Grass Block
-        addBlock(x, surfaceY, z, 'grass');
-
-        // 5. Trees (optimized canopy)
-        if (Math.random() < 0.025 && Math.abs(x) > 2 && Math.abs(z) > 2) {
-          const trunkBase = surfaceY + 1;
-          const woodType = Math.random() < 0.5 ? 'birch' : 'wood';
-
-          for (let ty = 0; ty < 3; ty++) {
-            addBlock(x, trunkBase + ty, z, woodType);
-          }
-          const leafY = trunkBase + 3;
-          for (let lx = -1; lx <= 1; lx++) {
-            for (let lz = -1; lz <= 1; lz++) {
-              if (Math.abs(lx) + Math.abs(lz) <= 1) {
-                addBlock(x + lx, leafY, z + lz, 'leaves');
-              }
-            }
-          }
+    for (let i = 0; i < count; i++) {
+      const rx = Math.floor(Math.random() * 28) - 14;
+      const rz = Math.floor(Math.random() * 28) - 14;
+      
+      let ry = 8;
+      for (let y = 20; y >= -10; y--) {
+        if (chunkManagerRef.current?.hasBlock(rx, y, rz)) {
+          ry = y + 1.0;
+          break;
         }
       }
+
+      const cowData = createCowMesh();
+      cowData.group.position.set(rx, ry, rz);
+      
+      const mobId = `cow_${Math.random().toString(36).substr(2, 9)}`;
+      cowData.group.name = mobId;
+      scene.add(cowData.group);
+
+      mobsRef.current.push({
+        id: mobId,
+        mesh: cowData.group,
+        x: rx,
+        y: ry,
+        z: rz,
+        targetX: rx + (Math.random() * 10 - 5),
+        targetZ: rz + (Math.random() * 10 - 5),
+        idleTimer: Math.random() * 6 + 2,
+        health: 4,
+        legFL: cowData.legFL,
+        legFR: cowData.legFR,
+        legBL: cowData.legBL,
+        legBR: cowData.legBR,
+        flashTimer: 0,
+      });
     }
-  }, [addBlock]);
+  }, [createCowMesh]);
+
+  // High-Performance Dynamic Procedural Voxel World Generator
+  const generateWorld = useCallback((_worldSize?: number) => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+
+    if (!chunkManagerRef.current) {
+      chunkManagerRef.current = new ChunkManager({
+        scene,
+        renderDistance: settings.renderDistance,
+        seed: 42,
+        useWorker: true,
+      });
+    }
+
+    // Pre-generate spawn region chunks immediately around (0, 0)
+    chunkManagerRef.current.generateInitialArea(0, 0, Math.min(settings.renderDistance, 3));
+  }, [settings.renderDistance]);
 
   // Initialize Three.js Scene, Camera, Renderer
   useEffect(() => {
@@ -1718,6 +1711,10 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     return () => {
       window.removeEventListener('resize', handleResize);
       if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
+      if (chunkManagerRef.current) {
+        chunkManagerRef.current.dispose();
+        chunkManagerRef.current = null;
+      }
       renderer.dispose();
       if (container && renderer.domElement) {
         container.removeChild(renderer.domElement);
@@ -1725,17 +1722,30 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
     };
   }, [handleResize]); // Run only once, but depend on handleResize
 
+  // Sync render distance dynamically when settings change
+  useEffect(() => {
+    if (chunkManagerRef.current) {
+      chunkManagerRef.current.renderDistance = settings.renderDistance;
+    }
+  }, [settings.renderDistance]);
+
   // Trigger world generation when game starts (Optimized Smooth World)
   useEffect(() => {
     if (gameStarted && !worldGeneratedRef.current) {
       worldGeneratedRef.current = true;
-      generateWorld(30); // Optimized world size for buttery smooth 60 FPS
-      spawnCows(20); // Spawn 20 cute cow mobs!
+      generateWorld(60); // Increased world size
+      spawnCows(0); // No initial cows!
+      
+      // Spawn cows every 5 minutes
+      const spawnInterval = setInterval(() => {
+        spawnAdditionalCows(5);
+      }, 5 * 60 * 1000);
+      intervalRef.current = spawnInterval;
 
       // Position Steve right on top of the surface grass at (0, 0)
       let spawnY = 8;
       for (let y = 20; y >= -10; y--) {
-        if (worldBlocksRef.current.has(`0,${y},0`)) {
+        if (chunkManagerRef.current?.hasBlock(0, y, 0)) {
           spawnY = y + 0.5; // Exactly at the top surface of the grass block
           break;
         }
@@ -1749,6 +1759,9 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
       handleResize(); // Ensure renderer is resized when it becomes visible
     }
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [gameStarted, generateWorld, spawnCows, handleResize]);
 
   // Update Held Block items in Player's Hand (First Person and Third Person)
@@ -1892,8 +1905,7 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
       raycaster.far = 7;
 
-      const blockMeshes: THREE.Mesh[] = [];
-      worldBlocksRef.current.forEach((val) => blockMeshes.push(val.mesh));
+      const chunkMeshes = chunkManagerRef.current?.getActiveChunkMeshes() || [];
 
       const cowGroups = mobsRef.current.map((mob) => mob.mesh);
 
@@ -1902,10 +1914,10 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         if (rp.collider) playerColliders.push(rp.collider);
       });
 
-      // Raycast against other players (PVP), mobs (cows), and world blocks
+      // Raycast against other players (PVP), mobs (cows), and world chunk meshes
       const intersectsPlayers = raycaster.intersectObjects(playerColliders, false);
       const intersectsCows = raycaster.intersectObjects(cowGroups, true);
-      const intersectsBlocks = raycaster.intersectObjects(blockMeshes, false);
+      const intersectsBlocks = raycaster.intersectObjects(chunkMeshes, false);
 
       const hitPlayer = intersectsPlayers.length > 0 ? intersectsPlayers[0] : null;
       const hitCow = intersectsCows.length > 0 ? intersectsCows[0] : null;
@@ -2007,20 +2019,20 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       }
 
       // 3. BLOCKS INTERACTIONS (ONLY IF WE ARE NOT INTERACTING WITH A PLAYER OR COW)
-      if (!hitBlock) return;
+      if (!hitBlock || !hitBlock.face) return;
 
-      const targetMesh = hitBlock.object as THREE.Mesh;
-      const bx = Math.round(targetMesh.position.x);
-      const by = Math.round(targetMesh.position.y);
-      const bz = Math.round(targetMesh.position.z);
+      const hitNormal = hitBlock.face.normal;
+      const inward = hitBlock.point.clone().sub(hitNormal.clone().multiplyScalar(0.4));
+      const bx = Math.round(inward.x);
+      const by = Math.round(inward.y);
+      const bz = Math.round(inward.z);
 
       if (e.button === 0) {
         // LEFT CLICK: START HOLD-TO-MINE SURVIVAL BLOCK
         punchAnimRef.current = 1.0;
         sendPlayerPunch();
 
-        const blockVal = worldBlocksRef.current.get(`${bx},${by},${bz}`);
-        const blockType = blockVal ? blockVal.type : 'dirt';
+        const blockType = (chunkManagerRef.current?.getBlockName(bx, by, bz) as BlockType) || 'dirt';
 
         isMouseDownLeftRef.current = true;
         miningBlockRef.current = {
@@ -2043,13 +2055,14 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         const pz = bz + Math.round(normal.z);
 
         // Physics check: prevent blocks from floating in mid-air (must connect to an existing block or ground)
-        const hasSupport = py <= 0 ||
-          worldBlocksRef.current.has(`${px},${py - 1},${pz}`) ||
-          worldBlocksRef.current.has(`${px},${py + 1},${pz}`) ||
-          worldBlocksRef.current.has(`${px + 1},${py},${pz}`) ||
-          worldBlocksRef.current.has(`${px - 1},${py},${pz}`) ||
-          worldBlocksRef.current.has(`${px},${py},${pz + 1}`) ||
-          worldBlocksRef.current.has(`${px},${py},${pz - 1}`);
+        const cm = chunkManagerRef.current;
+        const hasSupport = py <= -6 ||
+          (cm?.hasBlock(px, py - 1, pz) ?? false) ||
+          (cm?.hasBlock(px, py + 1, pz) ?? false) ||
+          (cm?.hasBlock(px + 1, py, pz) ?? false) ||
+          (cm?.hasBlock(px - 1, py, pz) ?? false) ||
+          (cm?.hasBlock(px, py, pz + 1) ?? false) ||
+          (cm?.hasBlock(px, py, pz - 1) ?? false);
 
         if (!hasSupport) {
           sound.playTone(180, 'sawtooth', 0.08, 0.1);
@@ -2214,25 +2227,34 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
       const now = performance.now();
       const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
+      
+      // Optimization: Dynamic Chunk Manager update (streaming, prediction & disposal)
+      if (chunkManagerRef.current) {
+        const p = playerPosRef.current;
+        const vx = (p.x - lastPosXRef.current) / Math.max(dt, 0.001);
+        const vz = (p.z - lastPosZRef.current) / Math.max(dt, 0.001);
+        lastPosXRef.current = p.x;
+        lastPosZRef.current = p.z;
+        chunkManagerRef.current.update(p.x, p.z, vx, vz);
+      }
 
       const crack = crackMeshRef.current;
 
       // Block mining continuous progress update
       if (isMouseDownLeftRef.current && miningBlockRef.current && camera) {
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-        raycaster.far = 7;
+        _raycaster.setFromCamera(_screenCenter, camera);
+        _raycaster.far = 7;
 
-        const blockMeshes: THREE.Mesh[] = [];
-        worldBlocksRef.current.forEach((val) => blockMeshes.push(val.mesh));
-        const intersectsBlocks = raycaster.intersectObjects(blockMeshes, false);
+        const chunkMeshes = chunkManagerRef.current?.getActiveChunkMeshes() || [];
+        const intersectsBlocks = _raycaster.intersectObjects(chunkMeshes, false);
         const hitBlock = intersectsBlocks.length > 0 ? intersectsBlocks[0] : null;
 
-        if (hitBlock) {
-          const targetMesh = hitBlock.object as THREE.Mesh;
-          const bx = Math.round(targetMesh.position.x);
-          const by = Math.round(targetMesh.position.y);
-          const bz = Math.round(targetMesh.position.z);
+        if (hitBlock && hitBlock.face) {
+          const hitNormal = hitBlock.face.normal;
+          const inward = hitBlock.point.clone().sub(hitNormal.clone().multiplyScalar(0.4));
+          const bx = Math.round(inward.x);
+          const by = Math.round(inward.y);
+          const bz = Math.round(inward.z);
 
           const mb = miningBlockRef.current;
           if (bx === mb.x && by === mb.y && bz === mb.z) {
@@ -2429,42 +2451,82 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
         const nextX = pos.x + stepX;
         const nextZ = pos.z + stepZ;
 
-        // Check if a block at a coordinate is solid/exists
-        const isSolid = (x: number, y: number, z: number) => {
-          const key = `${Math.round(x)},${Math.round(y)},${Math.round(z)}`;
-          return worldBlocksRef.current.has(key);
-        };
+        const cm = chunkManagerRef.current;
+        // Check if destination chunk is ready before crossing
+        const isTargetLoaded = cm ? (cm.isChunkReadyAt(nextX, pos.z) && cm.isChunkReadyAt(pos.x, nextZ)) : true;
 
-        // Check collision at player's foot and head height
-        const feetBlockY = Math.round(pos.y);
-        const headBlockY = Math.round(pos.y + 1.5);
+        if (isTargetLoaded) {
+          const isSolid = (x: number, y: number, z: number) => {
+            return cm?.hasBlock(Math.round(x), Math.round(y), Math.round(z)) ?? false;
+          };
 
-        const collidesX = isSolid(nextX, feetBlockY, pos.z) || isSolid(nextX, headBlockY, pos.z);
-        const collidesZ = isSolid(pos.x, feetBlockY, nextZ) || isSolid(pos.x, headBlockY, nextZ);
+          const feetBlockY = Math.round(pos.y);
+          const headBlockY = Math.round(pos.y + 1.5);
 
-        if (!collidesX) pos.x = nextX;
-        if (!collidesZ) pos.z = nextZ;
+          const collidesX = isSolid(nextX, feetBlockY, pos.z) || isSolid(nextX, headBlockY, pos.z);
+          const collidesZ = isSolid(pos.x, feetBlockY, nextZ) || isSolid(pos.x, headBlockY, nextZ);
+
+          if (!collidesX) pos.x = nextX;
+          if (!collidesZ) pos.z = nextZ;
+        } else {
+          // Destination chunk is generating: slide only along loaded boundaries
+          if (cm?.isChunkReadyAt(nextX, pos.z)) {
+            const feetBlockY = Math.round(pos.y);
+            const headBlockY = Math.round(pos.y + 1.5);
+            if (!cm.hasBlock(Math.round(nextX), feetBlockY, Math.round(pos.z)) &&
+                !cm.hasBlock(Math.round(nextX), headBlockY, Math.round(pos.z))) {
+              pos.x = nextX;
+            }
+          }
+          if (cm?.isChunkReadyAt(pos.x, nextZ)) {
+            const feetBlockY = Math.round(pos.y);
+            const headBlockY = Math.round(pos.y + 1.5);
+            if (!cm.hasBlock(Math.round(pos.x), feetBlockY, Math.round(nextZ)) &&
+                !cm.hasBlock(Math.round(pos.x), headBlockY, Math.round(nextZ))) {
+              pos.z = nextZ;
+            }
+          }
+        }
       }
 
-      // Voxel Ground Collision & Gravity
-      const groundY = getGroundHeightAt(pos.x, pos.z, pos.y);
+      // Voxel Ground Collision & Loading Safety Net Check
+      const groundInfo = chunkManagerRef.current
+        ? chunkManagerRef.current.getGroundHeightResult(pos.x, pos.z, pos.y)
+        : { groundY: -5.5, isLoaded: true, isSolid: false };
 
-      // Jump (only allow if standing firmly on ground)
-      if (keys.space && !pos.isJumping && pos.y <= groundY + 0.08) {
-        pos.isJumping = true;
-        pos.vy = 8.5;
-        sound.playTone(400, 'triangle', 0.08, 0.15);
-      }
+      const groundY = groundInfo.groundY;
 
-      // Apply vertical velocity & gravity
-      pos.y += pos.vy * dt;
-      pos.vy -= 24 * dt; // gravity
-
-      // Solid ground contact collision: prevent falling below ground
-      if (pos.y <= groundY) {
-        pos.y = groundY;
+      // SAFETY NET: If the chunk beneath player is loading or not ready:
+      if (!groundInfo.isLoaded) {
+        // Freeze downward vertical velocity to eliminate falling through
+        if (pos.vy < 0) pos.vy = 0;
         pos.isJumping = false;
-        pos.vy = 0;
+        // Hold player safely suspended at safe height until chunk is ready
+        pos.y = Math.max(pos.y, lastSafeYRef.current);
+      } else {
+        // Chunk is loaded: update last safe solid ground
+        if (groundInfo.isSolid) {
+          lastSafeYRef.current = groundY;
+        }
+
+        // Jump (only allow if standing firmly on ground)
+        if (keys.space && !pos.isJumping && pos.y <= groundY + 0.08) {
+          pos.isJumping = true;
+          pos.vy = 8.5;
+          sound.playTone(400, 'triangle', 0.08, 0.15);
+        }
+
+        // Apply vertical velocity & gravity
+        pos.y += pos.vy * dt;
+        pos.vy -= 24 * dt; // gravity
+        pos.vy = Math.max(pos.vy, -32); // Terminal velocity clamp
+
+        // Solid ground contact collision: prevent falling below ground
+        if (pos.y <= groundY) {
+          pos.y = groundY;
+          pos.isJumping = false;
+          pos.vy = 0;
+        }
       }
 
       // Void protection (respawn on surface if fallen into void)
@@ -2477,18 +2539,16 @@ export const MinecraftGame3D: React.FC<MinecraftGameProps> = ({
 
       // Update Highlight Selection Box
       if (camera && highlight) {
-        const raycaster = new THREE.Raycaster();
-        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-        raycaster.far = 7;
+        _raycaster.setFromCamera(_screenCenter, camera);
+        _raycaster.far = 7;
 
-        const blockMeshes: THREE.Mesh[] = [];
-        worldBlocksRef.current.forEach((val) => blockMeshes.push(val.mesh));
-
-        const intersects = raycaster.intersectObjects(blockMeshes, false);
-        if (intersects.length > 0) {
+        const chunkMeshes = chunkManagerRef.current?.getActiveChunkMeshes() || [];
+        const intersects = _raycaster.intersectObjects(chunkMeshes, false);
+        if (intersects.length > 0 && intersects[0].face) {
           const hit = intersects[0];
-          const hitPos = hit.point.clone().sub(hit.face!.normal.clone().multiplyScalar(0.1));
-          highlight.position.set(Math.round(hitPos.x), Math.round(hitPos.y), Math.round(hitPos.z));
+          const hitNormal = hit.face!.normal;
+          const inward = hit.point.clone().sub(hitNormal.clone().multiplyScalar(0.4));
+          highlight.position.set(Math.round(inward.x), Math.round(inward.y), Math.round(inward.z));
           highlight.visible = true;
         } else {
           highlight.visible = false;

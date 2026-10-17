@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketIOServer, Socket } from 'socket.io';
@@ -136,6 +137,39 @@ app.post('/api/leaderboard', (req, res) => {
     res.json({ success: true, entry: saved });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to save score' });
+  }
+});
+
+// Anthropic Claude API Proxy
+app.post('/api/claude', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) {
+    return res.status(400).json({ success: false, message: 'Prompt is required' });
+  }
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY || '',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-sonnet-20241022',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1024,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+        return res.status(response.status).json({ success: false, error: data.error?.message || 'Claude API Error' });
+    }
+    res.json({ success: true, response: data.content[0].text });
+  } catch (error) {
+    console.error('Claude API Error:', error);
+    res.status(500).json({ success: false, error: 'Failed to communicate with Claude' });
   }
 });
 
